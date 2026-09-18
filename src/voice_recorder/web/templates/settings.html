@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Configurações — Voice Recorder{% endblock %}
+{% block content %}
+<h1>Configurações</h1>
+
+<section>
+    <h2>Chave da API da OpenAI</h2>
+    {% if masked_key %}
+    <p>Chave atual: <code>{{ masked_key }}</code></p>
+    {% else %}
+    <p>Nenhuma chave configurada ainda.</p>
+    {% endif %}
+    <form method="post" action="/settings">
+        <label for="openai_api_key">Nova chave (platform.openai.com &rarr; API Keys)</label>
+        <input type="password" id="openai_api_key" name="openai_api_key" placeholder="sk-..." autocomplete="off">
+        <button type="submit">Salvar</button>
+    </form>
+</section>
+{% endblock %}

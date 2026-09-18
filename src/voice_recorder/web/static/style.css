@@ -1,0 +1,45 @@
+:root {
+    color-scheme: light dark;
+    font-family: system-ui, sans-serif;
+}
+
+body {
+    margin: 0;
+    padding: 0 1.5rem 2rem;
+}
+
+nav {
+    display: flex;
+    gap: 1rem;
+    padding: 1rem 0;
+    border-bottom: 1px solid #8884;
+    margin-bottom: 1.5rem;
+}
+
+nav a {
+    text-decoration: none;
+    font-weight: 600;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+th, td {
+    text-align: left;
+    padding: 0.5rem;
+    border-bottom: 1px solid #8882;
+}
+
+form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-width: 24rem;
+}
+
+input, button {
+    padding: 0.5rem;
+    font-size: 1rem;
+}

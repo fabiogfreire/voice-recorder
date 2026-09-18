@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Gravações — Voice Recorder{% endblock %}
+{% block content %}
+<h1>Gravações</h1>
+{% if recordings %}
+<table>
+    <thead>
+        <tr>
+            <th>Início</th>
+            <th>Modo</th>
+            <th>Origem</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in recordings %}
+        <tr>
+            <td>{{ r["started_at"] }}</td>
+            <td>{{ r["mode"] }}</td>
+            <td>{{ r["source_app"] or "Desconhecido" }}</td>
+            <td>{{ r["status"] }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>Nenhuma gravação ainda.</p>
+{% endif %}
+{% endblock %}

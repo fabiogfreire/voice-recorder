@@ -15,12 +15,15 @@ import uvicorn
 from .db import create_recording, init_db, update_recording
 from .filenames import sanitize_for_filename
 from .notifications.call_notifier import notify_recording_started
+from .notifications.playback_notifier import notify_playback_detected
 from .paths import get_recordings_dir
 from .transcription.worker import enqueue_transcription
 from .tray.tray_icon import run_tray_icon
 from .watcher.active_window import get_active_window_title
 from .watcher.audio_capture import CallRecording, ContentRecording
 from .watcher.mic_watcher import MicWatcher
+from .watcher.playback_watcher import PlaybackWatcher
+from .web.app import app as web_app
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("voice_recorder")
@@ -111,6 +114,18 @@ def is_content_recording() -> bool:
     return _current_content_recording is not None
 
 
+def is_call_recording() -> bool:
+    return _current_recording is not None
+
+
+def on_playback_detected() -> None:
+    """Áudio tocando sem nenhuma gravação em andamento — notifica com
+    opção de gravar (opt-in: nem todo som que toca no PC merece virar
+    transcrição, por isso não grava direto como no Modo 1)."""
+    logger.info("Áudio detectado tocando. Notificando opção de gravar.")
+    notify_playback_detected(on_record=on_content_toggle)
+
+
 def on_content_toggle() -> None:
     """Liga/desliga a gravação de conteúdo (Modo 2) — disparado pelo item
     "Gravar isso" da bandeja. Só a trilha de loopback, sem tag Fabio/Outros
@@ -153,7 +168,7 @@ def on_content_toggle() -> None:
 
 def start_web_server() -> None:
     uvicorn.run(
-        "voice_recorder.web.app:app",
+        web_app,
         host="127.0.0.1",
         port=8000,
         log_level="warning",
@@ -168,6 +183,12 @@ def main() -> None:
 
     mic_watcher = MicWatcher(on_call_start=on_call_start, on_call_end=on_call_end)
     mic_watcher.start()
+
+    playback_watcher = PlaybackWatcher(
+        on_playback_start=on_playback_detected,
+        should_check=lambda: not is_call_recording() and not is_content_recording(),
+    )
+    playback_watcher.start()
 
     logger.info("Voice Recorder rodando. UI em http://localhost:8000")
 

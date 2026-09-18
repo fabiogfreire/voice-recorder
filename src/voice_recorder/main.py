@@ -5,6 +5,7 @@ segundo plano — não precisa ser "iniciado" manualmente além de rodar isto
 """
 
 import logging
+import re
 import threading
 from datetime import datetime
 from typing import List, Optional
@@ -12,9 +13,11 @@ from typing import List, Optional
 import uvicorn
 
 from .db import create_recording, init_db, update_recording
+from .notifications.call_notifier import notify_recording_started
 from .paths import get_recordings_dir
 from .tray.tray_icon import run_tray_icon
-from .watcher.audio_capture import CallRecording
+from .watcher.active_window import get_active_window_title
+from .watcher.audio_capture import CallRecording, ContentRecording
 from .watcher.mic_watcher import MicWatcher
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -23,6 +26,16 @@ logger = logging.getLogger("voice_recorder")
 _lock = threading.Lock()
 _current_recording: Optional[CallRecording] = None
 _current_recording_id: Optional[int] = None
+
+_content_lock = threading.Lock()
+_current_content_recording: Optional[ContentRecording] = None
+_current_content_recording_id: Optional[int] = None
+
+_INVALID_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|]')
+
+
+def _sanitize_for_filename(text: str, max_length: int = 60) -> str:
+    return _INVALID_FILENAME_CHARS.sub("_", text).strip()[:max_length] or "Desconhecido"
 
 
 def _derive_source_name(active_apps: List[str]) -> str:
@@ -56,7 +69,7 @@ def on_call_start(active_apps: List[str]) -> None:
         _current_recording_id = recording_id
 
     logger.info("Call detectada (%s). Gravando mic+loopback separados.", source_name)
-    # TODO: disparar notificação com botão "Não gravar" (windows-toasts).
+    notify_recording_started(source_name, on_discard=on_discard_current)
 
 
 def on_call_end() -> None:
@@ -99,6 +112,51 @@ def on_discard_current() -> None:
     logger.info("Gravação #%s descartada.", recording_id)
 
 
+def is_content_recording() -> bool:
+    return _current_content_recording is not None
+
+
+def on_content_toggle() -> None:
+    """Liga/desliga a gravação de conteúdo (Modo 2) — disparado pelo item
+    "Gravar isso" da bandeja. Só a trilha de loopback, sem tag Fabio/Outros
+    nem botão de descarte, já que quem inicia é o próprio Fabio de
+    propósito."""
+    global _current_content_recording, _current_content_recording_id
+
+    with _content_lock:
+        if _current_content_recording is None:
+            source_name = _sanitize_for_filename(get_active_window_title() or "Conteúdo")
+            started_at = datetime.now()
+            base_name = f"{started_at.strftime('%Y-%m-%d_%Hh%M')}_{source_name}"
+            loopback_path = get_recordings_dir() / f"{base_name}_loopback.wav"
+
+            recording_id = create_recording(
+                mode="content", source_app=source_name, started_at=started_at.isoformat()
+            )
+            recording = ContentRecording(loopback_path)
+            recording.start()
+
+            _current_content_recording = recording
+            _current_content_recording_id = recording_id
+            logger.info("Gravação de conteúdo iniciada (%s).", source_name)
+            return
+
+        recording = _current_content_recording
+        recording_id = _current_content_recording_id
+        _current_content_recording = None
+        _current_content_recording_id = None
+
+    recording.stop()
+    update_recording(
+        recording_id,
+        ended_at=datetime.now().isoformat(),
+        status="recorded",
+        loopback_path=str(recording.loopback_path),
+    )
+    logger.info("Gravação de conteúdo #%s salva.", recording_id)
+    # TODO: enfileirar para transcrição via API da OpenAI.
+
+
 def start_web_server() -> None:
     uvicorn.run(
         "voice_recorder.web.app:app",
@@ -121,7 +179,11 @@ def main() -> None:
 
     # O ícone da bandeja bloqueia a thread principal — web server e watcher
     # já rodam nas suas próprias threads em background.
-    run_tray_icon(on_discard=on_discard_current)
+    run_tray_icon(
+        on_discard=on_discard_current,
+        on_toggle_content=on_content_toggle,
+        is_content_recording=is_content_recording,
+    )
 
 
 if __name__ == "__main__":

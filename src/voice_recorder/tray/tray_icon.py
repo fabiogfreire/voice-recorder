@@ -1,8 +1,7 @@
 """Ícone na bandeja do sistema (pystray) com o menu básico do app.
 
 Menu completo previsto no PRD (Abrir UI / Gravar isso / Descartar gravação
-atual / Pausar detecção / Sair) — "Gravar isso" (Modo 2) e "Pausar
-detecção" ainda entram numa próxima leva.
+atual / Pausar detecção / Sair) — falta só "Pausar detecção".
 """
 
 import threading
@@ -30,17 +29,32 @@ def _quit(icon, item) -> None:
     icon.stop()
 
 
-def run_tray_icon(on_discard: Optional[Callable[[], None]] = None) -> None:
+def run_tray_icon(
+    on_discard: Optional[Callable[[], None]] = None,
+    on_toggle_content: Optional[Callable[[], None]] = None,
+    is_content_recording: Optional[Callable[[], bool]] = None,
+) -> None:
     """Bloqueia a thread atual rodando o loop do ícone — deve ser chamado
     numa thread dedicada (a UI/watcher já rodam nas suas próprias).
 
-    `on_discard` é chamado ao clicar em "Descartar gravação atual" — é o
-    mesmo controle de opt-out da notificação (ainda não implementada),
-    disponível o tempo todo durante uma call, conforme o PRD."""
+    `on_discard` é chamado ao clicar em "Descartar gravação atual" — mesmo
+    controle de opt-out da notificação de call, disponível o tempo todo.
+    `on_toggle_content`/`is_content_recording` controlam o Modo 2 (manual):
+    o mesmo item liga e desliga a gravação de conteúdo/aula, trocando de
+    rótulo conforme o estado."""
 
     def _discard(icon, item) -> None:
         if on_discard:
             on_discard()
+
+    def _toggle_content(icon, item) -> None:
+        if on_toggle_content:
+            on_toggle_content()
+
+    def _content_label(item) -> str:
+        if is_content_recording and is_content_recording():
+            return "Parar gravação de conteúdo"
+        return "Gravar isso (conteúdo/aula)"
 
     icon = pystray.Icon(
         "voice-recorder",
@@ -48,6 +62,7 @@ def run_tray_icon(on_discard: Optional[Callable[[], None]] = None) -> None:
         "Voice Recorder",
         menu=pystray.Menu(
             pystray.MenuItem("Abrir UI", _open_ui, default=True),
+            pystray.MenuItem(_content_label, _toggle_content),
             pystray.MenuItem("Descartar gravação atual", _discard),
             pystray.MenuItem("Sair", _quit),
         ),
@@ -57,7 +72,13 @@ def run_tray_icon(on_discard: Optional[Callable[[], None]] = None) -> None:
 
 def start_tray_icon_in_background(
     on_discard: Optional[Callable[[], None]] = None,
+    on_toggle_content: Optional[Callable[[], None]] = None,
+    is_content_recording: Optional[Callable[[], bool]] = None,
 ) -> threading.Thread:
-    thread = threading.Thread(target=run_tray_icon, args=(on_discard,), daemon=True)
+    thread = threading.Thread(
+        target=run_tray_icon,
+        args=(on_discard, on_toggle_content, is_content_recording),
+        daemon=True,
+    )
     thread.start()
     return thread

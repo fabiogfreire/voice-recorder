@@ -15,6 +15,7 @@ import uvicorn
 from .db import create_recording, init_db, update_recording
 from .notifications.call_notifier import notify_recording_started
 from .paths import get_recordings_dir
+from .transcription.worker import enqueue_transcription
 from .tray.tray_icon import run_tray_icon
 from .watcher.active_window import get_active_window_title
 from .watcher.audio_capture import CallRecording, ContentRecording
@@ -91,7 +92,7 @@ def on_call_end() -> None:
         loopback_path=str(recording.loopback_path),
     )
     logger.info("Call encerrada. Gravação #%s salva.", recording_id)
-    # TODO: enfileirar para transcrição via API da OpenAI.
+    enqueue_transcription(recording_id)
 
 
 def on_discard_current() -> None:
@@ -154,7 +155,7 @@ def on_content_toggle() -> None:
         loopback_path=str(recording.loopback_path),
     )
     logger.info("Gravação de conteúdo #%s salva.", recording_id)
-    # TODO: enfileirar para transcrição via API da OpenAI.
+    enqueue_transcription(recording_id)
 
 
 def start_web_server() -> None:

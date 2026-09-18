@@ -2,6 +2,7 @@
 
 import sqlite3
 from contextlib import contextmanager
+from typing import Optional
 
 from .paths import get_db_path
 
@@ -41,6 +42,13 @@ def list_recordings() -> list[sqlite3.Row]:
         return conn.execute(
             "SELECT * FROM recordings ORDER BY started_at DESC"
         ).fetchall()
+
+
+def get_recording(recording_id: int) -> Optional[sqlite3.Row]:
+    with get_connection() as conn:
+        return conn.execute(
+            "SELECT * FROM recordings WHERE id = ?", (recording_id,)
+        ).fetchone()
 
 
 def create_recording(mode: str, source_app: str, started_at: str) -> int:

@@ -4,13 +4,14 @@ segundo plano — só é aberta no navegador quando o Fabio quiser consultar."""
 
 from pathlib import Path
 
-from fastapi import FastAPI, Form, Request
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from ..config import get_openai_api_key, save_openai_api_key
-from ..db import list_recordings
+from ..db import get_recording, list_recordings
+from ..transcription.worker import enqueue_transcription
 
 BASE_DIR = Path(__file__).parent
 
@@ -25,6 +26,22 @@ def index(request: Request):
     return templates.TemplateResponse(
         request, "index.html", {"recordings": recordings}
     )
+
+
+@app.post("/recordings/{recording_id}/transcribe")
+def transcribe(recording_id: int):
+    if get_recording(recording_id) is None:
+        raise HTTPException(status_code=404)
+    enqueue_transcription(recording_id)
+    return RedirectResponse("/", status_code=303)
+
+
+@app.get("/recordings/{recording_id}/transcript", response_class=PlainTextResponse)
+def transcript(recording_id: int):
+    row = get_recording(recording_id)
+    if row is None or not row["transcript_path"]:
+        raise HTTPException(status_code=404)
+    return Path(row["transcript_path"]).read_text(encoding="utf-8")
 
 
 @app.get("/settings")

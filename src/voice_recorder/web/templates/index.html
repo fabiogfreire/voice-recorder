@@ -10,6 +10,7 @@
             <th>Modo</th>
             <th>Origem</th>
             <th>Status</th>
+            <th>Ação</th>
         </tr>
     </thead>
     <tbody>
@@ -19,6 +20,15 @@
             <td>{{ r["mode"] }}</td>
             <td>{{ r["source_app"] or "Desconhecido" }}</td>
             <td>{{ r["status"] }}</td>
+            <td>
+                {% if r["status"] == "transcribed" %}
+                <a href="/recordings/{{ r['id'] }}/transcript" target="_blank">Ver transcrição</a>
+                {% elif r["status"] in ("recorded", "error") %}
+                <form method="post" action="/recordings/{{ r['id'] }}/transcribe">
+                    <button type="submit">Transcrever</button>
+                </form>
+                {% endif %}
+            </td>
         </tr>
         {% endfor %}
     </tbody>

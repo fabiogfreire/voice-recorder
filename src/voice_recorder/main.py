@@ -4,8 +4,8 @@ segundo plano — não precisa ser "iniciado" manualmente além de rodar isto
 (ou o .exe empacotado) uma vez, idealmente via Inicialização do Windows.
 """
 
+import json
 import logging
-import re
 import threading
 from datetime import datetime
 from typing import List, Optional
@@ -13,6 +13,7 @@ from typing import List, Optional
 import uvicorn
 
 from .db import create_recording, init_db, update_recording
+from .filenames import sanitize_for_filename
 from .notifications.call_notifier import notify_recording_started
 from .paths import get_recordings_dir
 from .transcription.worker import enqueue_transcription
@@ -31,12 +32,6 @@ _current_recording_id: Optional[int] = None
 _content_lock = threading.Lock()
 _current_content_recording: Optional[ContentRecording] = None
 _current_content_recording_id: Optional[int] = None
-
-_INVALID_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|]')
-
-
-def _sanitize_for_filename(text: str, max_length: int = 60) -> str:
-    return _INVALID_FILENAME_CHARS.sub("_", text).strip()[:max_length] or "Desconhecido"
 
 
 def _derive_source_name(active_apps: List[str]) -> str:
@@ -58,12 +53,11 @@ def on_call_start(active_apps: List[str]) -> None:
         started_at = datetime.now()
         base_name = f"{started_at.strftime('%Y-%m-%d_%Hh%M')}_{source_name}"
         mic_path = get_recordings_dir() / f"{base_name}_mic.wav"
-        loopback_path = get_recordings_dir() / f"{base_name}_loopback.wav"
 
         recording_id = create_recording(
             mode="call", source_app=source_name, started_at=started_at.isoformat()
         )
-        recording = CallRecording(mic_path, loopback_path)
+        recording = CallRecording(mic_path, get_recordings_dir(), base_name)
         recording.start()
 
         _current_recording = recording
@@ -89,7 +83,7 @@ def on_call_end() -> None:
         ended_at=datetime.now().isoformat(),
         status="recorded",
         mic_path=str(recording.mic_path),
-        loopback_path=str(recording.loopback_path),
+        loopback_path=json.dumps([str(p) for p in recording.loopback_paths]),
     )
     logger.info("Call encerrada. Gravação #%s salva.", recording_id)
     enqueue_transcription(recording_id)
@@ -126,15 +120,14 @@ def on_content_toggle() -> None:
 
     with _content_lock:
         if _current_content_recording is None:
-            source_name = _sanitize_for_filename(get_active_window_title() or "Conteúdo")
+            source_name = sanitize_for_filename(get_active_window_title() or "Conteúdo")
             started_at = datetime.now()
             base_name = f"{started_at.strftime('%Y-%m-%d_%Hh%M')}_{source_name}"
-            loopback_path = get_recordings_dir() / f"{base_name}_loopback.wav"
 
             recording_id = create_recording(
                 mode="content", source_app=source_name, started_at=started_at.isoformat()
             )
-            recording = ContentRecording(loopback_path)
+            recording = ContentRecording(get_recordings_dir(), base_name)
             recording.start()
 
             _current_content_recording = recording
@@ -152,7 +145,7 @@ def on_content_toggle() -> None:
         recording_id,
         ended_at=datetime.now().isoformat(),
         status="recorded",
-        loopback_path=str(recording.loopback_path),
+        loopback_path=json.dumps([str(p) for p in recording.loopback_paths]),
     )
     logger.info("Gravação de conteúdo #%s salva.", recording_id)
     enqueue_transcription(recording_id)

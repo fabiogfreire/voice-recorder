@@ -11,8 +11,10 @@ Esse sinal é independente de qual app está em uso, por isso funciona pra
 qualquer ferramenta de call sem precisar de uma lista configurada.
 """
 
+import ctypes
 import threading
 import winreg
+from ctypes import wintypes
 from dataclasses import dataclass
 from typing import Callable, Iterator, List, Optional, Tuple
 
@@ -20,6 +22,27 @@ CONSENT_STORE_PATH = (
     r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager"
     r"\ConsentStore\microphone"
 )
+
+_kernel32 = ctypes.windll.kernel32
+_kernel32.QueryFullProcessImageNameW.argtypes = [
+    wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)
+]
+_kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+_kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+
+
+def _own_process_label() -> Optional[str]:
+    """Rótulo (mesmo formato de _iter_app_keys) do próprio processo — usado
+    pra excluí-lo da detecção. Sem isso, o app nunca vê "call encerrada"
+    enquanto está gravando, porque ele mesmo usa o microfone e aparece
+    como "ativo" no ConsentStore junto com o app da call de verdade
+    (bug real, encontrado gravando uma call de WhatsApp de verdade)."""
+    buf = ctypes.create_unicode_buffer(1024)
+    size = wintypes.DWORD(1024)
+    handle = _kernel32.GetCurrentProcess()
+    if not _kernel32.QueryFullProcessImageNameW(handle, wintypes.DWORD(0), buf, ctypes.byref(size)):
+        return None
+    return f"NonPackaged\\{buf.value.replace(chr(92), '#')}"
 
 
 @dataclass
@@ -82,11 +105,13 @@ def _is_active(parent_key, app_name: str) -> bool:
 
 
 def get_active_mic_apps() -> List[str]:
-    """Retorna os rótulos dos apps com o microfone em uso agora."""
+    """Retorna os rótulos dos apps com o microfone em uso agora, excluindo
+    o próprio processo do Voice Recorder."""
+    own_label = _own_process_label()
     return [
         label
         for label, parent_key, app_name in _iter_app_keys()
-        if _is_active(parent_key, app_name)
+        if label.lower() != (own_label or "").lower() and _is_active(parent_key, app_name)
     ]
 
 

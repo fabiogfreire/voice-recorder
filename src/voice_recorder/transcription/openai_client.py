@@ -9,14 +9,33 @@ Dois modelos, conforme testado com uma chave real:
   timestamp — mais novo e mais barato, usado como texto simples.
 """
 
+import wave
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List
 
+import numpy as np
 from openai import OpenAI
 
 MODEL_WITH_TIMESTAMPS = "whisper-1"
 MODEL_PLAIN = "gpt-transcribe"
+
+# Abaixo disso, tratamos como silêncio/ruído de fundo, não fala de verdade.
+# Calibrado com testes reais: ruído de fundo típico fica na casa de 15-20,
+# fala real fica bem acima de 300. Sem esse filtro, o Whisper "alucina"
+# frases genéricas (ex: "Thanks for watching!") em trilhas praticamente
+# vazias — visto na prática numa trilha de loopback sem áudio real.
+_SILENCE_RMS_THRESHOLD = 60.0
+
+
+def has_audio_signal(path: Path) -> bool:
+    with wave.open(str(path), "rb") as wav_file:
+        frames = wav_file.readframes(wav_file.getnframes())
+    if not frames:
+        return False
+    data = np.frombuffer(frames, dtype=np.int16).astype(np.float64)
+    rms = float(np.sqrt(np.mean(data**2)))
+    return rms >= _SILENCE_RMS_THRESHOLD
 
 
 @dataclass
@@ -32,6 +51,9 @@ def _client(api_key: str) -> OpenAI:
 def transcribe_track(
     path: Path, api_key: str, with_timestamps: bool
 ) -> List[TranscriptSegment]:
+    if not has_audio_signal(path):
+        return []
+
     client = _client(api_key)
 
     if with_timestamps:

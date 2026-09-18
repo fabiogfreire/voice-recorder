@@ -46,11 +46,12 @@ Repositório: `C:\DEV\voice-recorder`.
 
 ### Comum aos dois modos
 
-- **Transcrição**: via **API da OpenAI direto** (conta própria em platform.openai.com, com crédito ativo) — sem passar por OpenRouter, já que pra uma chamada isolada como transcrição não há ganho em agregador, só margem extra no preço. Modelos disponíveis na API: `gpt-transcribe` (recomendado, uso geral, ~US$0,0045/min), `gpt-4o-mini-transcribe` (mais barato, cobrado por token — diferença irrelevante no volume pessoal), `gpt-4o-transcribe-diarize` (identifica falantes distintos dentro de uma trilha — melhoria futura), `whisper-1` (legado). **Modelo escolhido pro MVP: `gpt-transcribe`**, aplicado separadamente em cada trilha no modo call. Chave de API a criar em platform.openai.com → API Keys, nome sugerido `voice-recorder`.
+- **Transcrição**: via **API da OpenAI direto** (conta própria em platform.openai.com, com crédito ativo) — sem passar por OpenRouter, já que pra uma chamada isolada como transcrição não há ganho em agregador, só margem extra no preço. Modelos disponíveis na API: `gpt-transcribe` (uso geral, ~US$0,0045/min), `gpt-4o-mini-transcribe` (mais barato, cobrado por token — diferença irrelevante no volume pessoal), `gpt-4o-transcribe-diarize` (identifica falantes distintos dentro de uma trilha — melhoria futura), `whisper-1` (legado). Chave de API criada em platform.openai.com → API Keys, nome `voice-recorder`.
+  - **Correção de arquitetura (18/09, testado com chave real)**: `gpt-transcribe` **não aceita** `response_format=verbose_json` (erro 400 "not compatible") — só devolve o texto inteiro num bloco só, sem timestamp por segmento. Isso inviabiliza a mesclagem cronológica Fabio/Outros do Modo 1, que depende de saber o instante de cada frase dentro da trilha. `whisper-1` foi testado e suporta `verbose_json` com segmentos normalmente. **Modelo final: `whisper-1` no Modo 1** (call, onde a mescla por timestamp é essencial) e **`gpt-transcribe` no Modo 2** (conteúdo/aula, trilha única, sem necessidade de timestamp — mais novo/barato onde não há perda).
 - **Armazenamento**: transcrição salva em `.txt` por gravação (formato de nome sugerido: `AAAA-MM-DD_HHhMM_<origem>.txt`), guardando também o áudio original (ou descartando após transcrever — decisão pendente) numa pasta local dedicada.
 - **UI e execução**: interface web local (FastAPI + frontend simples), rodando **sempre em segundo plano** dentro do mesmo processo do watcher — nunca precisa ser "iniciada" manualmente. Só abre o navegador em `localhost` quando quiser consultar. Empacotar tudo (watcher + servidor) num único `.exe` via PyInstaller, com atalho na pasta de Inicialização do Windows (ou Agendador de Tarefas) pra subir sozinho no boot, e um ícone na bandeja do sistema (`pystray`) com menu simples (Abrir UI / Gravar isso [modo aula] / Descartar gravação atual / Pausar detecção / Sair).
 - **Resumo automático**: tratado como **próximo incremento natural** assim que a captura+transcrição estiver validada no dia a dia — é só mais uma chamada à mesma API da OpenAI usando o `.txt` já gerado, não um módulo novo. Continua fora do MVP inicial, mas não deve ficar esquecido depois.
-- **Escopo do MVP**: gravação automática de call (opt-out, trilhas separadas Fabio/Outros) + modo manual de conteúdo/aula + detecção de origem + botão "Não gravar" (só no modo call) + transcrição (`gpt-transcribe`, por trilha, mesclada por timestamp) + UI de consulta.
+- **Escopo do MVP**: gravação automática de call (opt-out, trilhas separadas Fabio/Outros) + modo manual de conteúdo/aula + detecção de origem + botão "Não gravar" (só no modo call) + transcrição (`whisper-1` no call, mesclada por timestamp; `gpt-transcribe` no conteúdo) + UI de consulta.
 
 ## Componentes técnicos (rascunho)
 
@@ -61,14 +62,16 @@ Repositório: `C:\DEV\voice-recorder`.
 
 ## Pendências / decisões em aberto
 
-- [ ] Criar a chave de API na OpenAI (platform.openai.com → API Keys) dedicada a esse projeto.
+- [x] Criar a chave de API na OpenAI (platform.openai.com → API Keys) dedicada a esse projeto — feito em 18/09/2026.
 - [ ] Manter o áudio bruto salvo (ocupa espaço, mas permite reprocessar/ouvir de novo) ou descartar depois de transcrever (mais leve, mas perde o original) — vale considerar manter as duas trilhas separadas se guardar.
 - [ ] Formato de organização das pastas de transcrição (por data? por app? por mês? separar call de conteúdo/aula?).
-- [ ] Definir o atalho de teclado global pro modo manual (gravar conteúdo/aula).
+- [ ] Definir o atalho de teclado global pro modo manual (gravar conteúdo/aula) — por ora, só via ícone da bandeja ("Gravar isso").
 - [ ] Avaliar `gpt-4o-transcribe-diarize` como upgrade futuro, aplicado só na trilha de loopback, pra separar entre si os participantes externos numa call de grupo.
+- [ ] Empacotar em `.exe` (PyInstaller) + atalho de Inicialização do Windows — próximo passo.
 
 ## Status
 
-- 18/09/2026: PRD inicial criado e evoluído. Decisões de arquitetura fechadas: gatilho por uso do microfone pra calls (gravação automática opt-out, com botão "Não gravar" sempre disponível), mic e loopback gravados em trilhas separadas e transcritos/mesclados por timestamp com tag "Fabio"/"Outros", modo manual adicional pra gravar conteúdo/aulas, sem lista de exceções por app, transcrição via API da OpenAI direto (modelo `gpt-transcribe`), UI web local rodando sempre em segundo plano (mesmo processo do watcher, empacotado como `.exe` + ícone na bandeja), resumo automático tratado como próximo incremento natural. Desenvolvimento ainda não iniciado — começando agora no Antigravity.
+- 18/09/2026: PRD inicial criado e evoluído. Decisões de arquitetura fechadas: gatilho por uso do microfone pra calls (gravação automática opt-out, com botão "Não gravar" sempre disponível), mic e loopback gravados em trilhas separadas e transcritos/mesclados por timestamp com tag "Fabio"/"Outros", modo manual adicional pra gravar conteúdo/aulas, sem lista de exceções por app, transcrição via API da OpenAI direto, UI web local rodando sempre em segundo plano (mesmo processo do watcher, empacotado como `.exe` + ícone na bandeja), resumo automático tratado como próximo incremento natural.
+- 18/09/2026: Modo 1 (call) implementado e testado de ponta a ponta com áudio real — detecção via registro do microfone, captura mic+loopback (`soundcard`), notificação "Não gravar" (`windows_toasts`), descarte pela bandeja, e transcrição via API da OpenAI. Modo 2 (conteúdo/aula) implementado via bandeja ("Gravar isso"), testado com uma janela real do Chrome. Corrigido em teste real: `gpt-transcribe` não aceita timestamps por segmento — trocado por `whisper-1` no Modo 1 (mescla por timestamp) mantendo `gpt-transcribe` no Modo 2. Repositório versionado em git (local, remoto ainda pendente no automatizatec). Falta: empacotamento em `.exe`.
 - Cópia de referência mantida também no Segundo Cérebro (Cowork), em `pessoal/voice-recorder.md`.
 - Última atualização: 18/09/2026

@@ -29,10 +29,13 @@ MODEL_PLAIN = "gpt-transcribe"
 
 # Abaixo disso, tratamos como silêncio/ruído de fundo, não fala de verdade.
 # Calibrado com testes reais: ruído de fundo típico fica na casa de 15-20,
-# fala real fica bem acima de 300. Sem esse filtro, o Whisper "alucina"
-# frases genéricas (ex: "Thanks for watching!") em trilhas praticamente
-# vazias — visto na prática numa trilha de loopback sem áudio real.
-_SILENCE_RMS_THRESHOLD = 60.0
+# fala/áudio real fica bem acima disso — mas nem sempre muito acima: um
+# vídeo tocando baixo num monitor externo mediu RMS 56, que o limiar
+# antigo (60) rejeitava por engano. Baixado com margem de segurança acima
+# do ruído de fundo, mas abaixo de conteúdo real mesmo quieto. Sem esse
+# filtro, o Whisper "alucina" frases genéricas (ex: "Thanks for
+# watching!") em trilhas praticamente vazias.
+_SILENCE_RMS_THRESHOLD = 30.0
 
 # Margem de segurança abaixo do limite real de 25MB da API.
 _MAX_CHUNK_BYTES = 24 * 1024 * 1024

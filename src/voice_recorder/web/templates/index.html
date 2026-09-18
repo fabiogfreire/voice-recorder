@@ -20,7 +20,7 @@
             <td>{{ r["mode"] }}</td>
             <td>{{ r["source_app"] or "Desconhecido" }}</td>
             <td>{{ r["status"] }}</td>
-            <td>
+            <td class="actions">
                 {% if r["status"] == "transcribed" %}
                 <a href="/recordings/{{ r['id'] }}/transcript" target="_blank">Ver transcrição</a>
                 {% elif r["status"] in ("recorded", "error") %}
@@ -28,6 +28,10 @@
                     <button type="submit">Transcrever</button>
                 </form>
                 {% endif %}
+                <form method="post" action="/recordings/{{ r['id'] }}/delete"
+                      onsubmit="return confirm('Apagar esta gravação e os arquivos?');">
+                    <button type="submit" class="danger">Apagar</button>
+                </form>
             </td>
         </tr>
         {% endfor %}

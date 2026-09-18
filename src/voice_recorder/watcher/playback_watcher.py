@@ -14,9 +14,10 @@ import soundcard as sc
 _CHECK_SAMPLE_RATE = 16000
 _CHECK_FRAMES = 4096
 
-# Mesma ideia do limiar de silêncio da transcrição (openai_client.py), mas
-# em escala float (-1..1) já que aqui não convertemos pra int16.
-_SIGNAL_THRESHOLD = 0.0018
+# Mesma ideia do limiar de silêncio da transcrição (openai_client.py,
+# ajustado pra 30/32767), mas em escala float (-1..1) já que aqui não
+# convertemos pra int16.
+_SIGNAL_THRESHOLD = 30.0 / 32767
 
 
 def _any_device_has_signal() -> bool:

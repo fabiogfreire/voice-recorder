@@ -60,6 +60,11 @@ def create_recording(mode: str, source_app: str, started_at: str) -> int:
         return cur.lastrowid
 
 
+def delete_recording(recording_id: int) -> None:
+    with get_connection() as conn:
+        conn.execute("DELETE FROM recordings WHERE id = ?", (recording_id,))
+
+
 def update_recording(recording_id: int, **fields) -> None:
     if not fields:
         return

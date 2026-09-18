@@ -2,15 +2,16 @@
 para a chave da OpenAI. Roda dentro do mesmo processo do watcher, sempre em
 segundo plano — só é aberta no navegador quando o Fabio quiser consultar."""
 
+import json
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from ..config import get_openai_api_key, save_openai_api_key
-from ..db import get_recording, list_recordings
+from ..db import delete_recording, get_recording, list_recordings
 from ..transcription.worker import enqueue_transcription
 
 BASE_DIR = Path(__file__).parent
@@ -36,12 +37,45 @@ def transcribe(recording_id: int):
     return RedirectResponse("/", status_code=303)
 
 
-@app.get("/recordings/{recording_id}/transcript", response_class=PlainTextResponse)
-def transcript(recording_id: int):
+@app.get("/recordings/{recording_id}/transcript")
+def transcript(request: Request, recording_id: int):
     row = get_recording(recording_id)
     if row is None or not row["transcript_path"]:
         raise HTTPException(status_code=404)
-    return Path(row["transcript_path"]).read_text(encoding="utf-8")
+    text = Path(row["transcript_path"]).read_text(encoding="utf-8")
+    return templates.TemplateResponse(
+        request, "transcript.html", {"recording": row, "text": text}
+    )
+
+
+@app.get("/recordings/{recording_id}/transcript/download")
+def download_transcript(recording_id: int):
+    row = get_recording(recording_id)
+    if row is None or not row["transcript_path"]:
+        raise HTTPException(status_code=404)
+    path = Path(row["transcript_path"])
+    return FileResponse(path, filename=path.name, media_type="text/plain")
+
+
+@app.post("/recordings/{recording_id}/delete")
+def delete(recording_id: int):
+    row = get_recording(recording_id)
+    if row is None:
+        raise HTTPException(status_code=404)
+
+    paths = []
+    if row["mic_path"]:
+        paths.append(Path(row["mic_path"]))
+    if row["loopback_path"]:
+        paths.extend(Path(p) for p in json.loads(row["loopback_path"]))
+    if row["transcript_path"]:
+        paths.append(Path(row["transcript_path"]))
+
+    for path in paths:
+        path.unlink(missing_ok=True)
+
+    delete_recording(recording_id)
+    return RedirectResponse("/", status_code=303)
 
 
 @app.get("/settings")

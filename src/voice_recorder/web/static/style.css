@@ -43,3 +43,25 @@ input, button {
     padding: 0.5rem;
     font-size: 1rem;
 }
+
+td.actions form {
+    display: inline-block;
+    max-width: none;
+    margin-right: 0.5rem;
+}
+
+button.danger {
+    background: #c0392b;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+pre {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    background: #8881;
+    padding: 1rem;
+    border-radius: 6px;
+}

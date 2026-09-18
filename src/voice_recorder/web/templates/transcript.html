@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Transcrição — Voice Recorder{% endblock %}
+{% block content %}
+<h1>{{ recording["source_app"] or "Desconhecido" }}</h1>
+<p>{{ recording["started_at"] }} — modo: {{ recording["mode"] }}</p>
+
+{% if text.strip() %}
+<p><a href="/recordings/{{ recording['id'] }}/transcript/download">Baixar .txt</a></p>
+<pre>{{ text }}</pre>
+{% else %}
+<p><em>Transcrição vazia — nenhum áudio real foi detectado nessa gravação.</em></p>
+{% endif %}
+{% endblock %}

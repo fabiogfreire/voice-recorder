@@ -47,15 +47,21 @@ def transcribe_recording(recording_id: int, api_key: str) -> None:
 
     try:
         if row["mode"] == "call":
-            mic_segments = transcribe_track(Path(row["mic_path"]), api_key)
-            loopback_segments = transcribe_track(Path(row["loopback_path"]), api_key)
+            mic_segments = transcribe_track(
+                Path(row["mic_path"]), api_key, with_timestamps=True
+            )
+            loopback_segments = transcribe_track(
+                Path(row["loopback_path"]), api_key, with_timestamps=True
+            )
             transcript_text = _merge_call_segments(mic_segments, loopback_segments)
             reference_path = Path(row["mic_path"])
             transcript_path = reference_path.with_name(
                 reference_path.name.replace("_mic.wav", ".txt")
             )
         else:
-            loopback_segments = transcribe_track(Path(row["loopback_path"]), api_key)
+            loopback_segments = transcribe_track(
+                Path(row["loopback_path"]), api_key, with_timestamps=False
+            )
             transcript_text = _render_content_transcript(loopback_segments)
             reference_path = Path(row["loopback_path"])
             transcript_path = reference_path.with_name(

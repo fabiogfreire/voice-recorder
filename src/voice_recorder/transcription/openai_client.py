@@ -1,18 +1,22 @@
 """Cliente fino sobre a API de transcrição da OpenAI.
 
-Pede timestamps por segmento (`verbose_json` + `timestamp_granularities`)
-pra permitir mesclar as trilhas mic/loopback por ordem cronológica no Modo
-1. Se o modelo não aceitar esses parâmetros (ainda não confirmado em uso
-real — só testável com uma chave de API válida), cai pra uma transcrição
-única sem timestamps (tratada como um segmento começando em 0s)."""
+Dois modelos, conforme testado com uma chave real:
+- `whisper-1` no Modo 1 (call): é o único que aceita `verbose_json` com
+  timestamp por segmento — necessário pra mesclar mic (Fabio) e loopback
+  (Outros) em ordem cronológica. `gpt-transcribe` recusa esse
+  response_format (testado: erro 400 "not compatible").
+- `gpt-transcribe` no Modo 2 (conteúdo): trilha única, sem necessidade de
+  timestamp — mais novo e mais barato, usado como texto simples.
+"""
 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List
 
-from openai import BadRequestError, OpenAI
+from openai import OpenAI
 
-MODEL = "gpt-transcribe"
+MODEL_WITH_TIMESTAMPS = "whisper-1"
+MODEL_PLAIN = "gpt-transcribe"
 
 
 @dataclass
@@ -25,32 +29,29 @@ def _client(api_key: str) -> OpenAI:
     return OpenAI(api_key=api_key)
 
 
-def transcribe_track(path: Path, api_key: str) -> List[TranscriptSegment]:
+def transcribe_track(
+    path: Path, api_key: str, with_timestamps: bool
+) -> List[TranscriptSegment]:
     client = _client(api_key)
 
-    try:
+    if with_timestamps:
         with open(path, "rb") as audio_file:
             result = client.audio.transcriptions.create(
                 file=audio_file,
-                model=MODEL,
+                model=MODEL_WITH_TIMESTAMPS,
                 response_format="verbose_json",
                 timestamp_granularities=["segment"],
             )
-        segments = getattr(result, "segments", None)
-        if segments:
-            return [
-                TranscriptSegment(start_seconds=segment.start, text=segment.text.strip())
-                for segment in segments
-                if segment.text.strip()
-            ]
-        text = (getattr(result, "text", "") or "").strip()
-        return [TranscriptSegment(0.0, text)] if text else []
-    except BadRequestError:
-        pass  # modelo não aceita verbose_json/timestamps — cai pro fallback abaixo
+        segments = result.segments or []
+        return [
+            TranscriptSegment(start_seconds=segment.start, text=segment.text.strip())
+            for segment in segments
+            if segment.text.strip()
+        ]
 
     with open(path, "rb") as audio_file:
         result = client.audio.transcriptions.create(
-            file=audio_file, model=MODEL, response_format="text"
+            file=audio_file, model=MODEL_PLAIN, response_format="text"
         )
     text = (result if isinstance(result, str) else getattr(result, "text", "")).strip()
     return [TranscriptSegment(0.0, text)] if text else []

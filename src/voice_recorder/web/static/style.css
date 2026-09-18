@@ -53,10 +53,17 @@ td.actions form {
 .icon-button {
     background: none;
     border: none;
-    font-size: 1.1rem;
+    color: currentColor;
     cursor: pointer;
     text-decoration: none;
     padding: 0.25rem;
+    display: inline-flex;
+    vertical-align: middle;
+}
+
+.icon-button svg {
+    width: 18px;
+    height: 18px;
 }
 
 pre {

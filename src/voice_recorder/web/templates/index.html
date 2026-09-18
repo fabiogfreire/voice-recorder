@@ -23,7 +23,9 @@
             <td class="actions">
                 {% if r["status"] == "transcribed" %}
                 <a href="/recordings/{{ r['id'] }}/transcript" target="_blank">Ver transcrição</a>
-                <a href="/recordings/{{ r['id'] }}/transcript/download" class="icon-button" title="Baixar transcrição">💾</a>
+                <a href="/recordings/{{ r['id'] }}/transcript/download" class="icon-button" title="Baixar transcrição">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                </a>
                 {% elif r["status"] in ("recorded", "error") %}
                 <form method="post" action="/recordings/{{ r['id'] }}/transcribe">
                     <button type="submit">Transcrever</button>
@@ -31,7 +33,9 @@
                 {% endif %}
                 <form method="post" action="/recordings/{{ r['id'] }}/delete"
                       onsubmit="return confirm('Apagar esta gravação e os arquivos?');">
-                    <button type="submit" class="icon-button" title="Apagar">🗑️</button>
+                    <button type="submit" class="icon-button" title="Apagar">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path></svg>
+                    </button>
                 </form>
             </td>
         </tr>

@@ -50,3 +50,12 @@ def create_recording(mode: str, source_app: str, started_at: str) -> int:
             (mode, source_app, started_at),
         )
         return cur.lastrowid
+
+
+def update_recording(recording_id: int, **fields) -> None:
+    if not fields:
+        return
+    columns = ", ".join(f"{key} = ?" for key in fields)
+    values = [*fields.values(), recording_id]
+    with get_connection() as conn:
+        conn.execute(f"UPDATE recordings SET {columns} WHERE id = ?", values)

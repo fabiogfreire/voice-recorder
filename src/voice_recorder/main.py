@@ -6,27 +6,97 @@ segundo plano — não precisa ser "iniciado" manualmente além de rodar isto
 
 import logging
 import threading
+from datetime import datetime
+from typing import List, Optional
 
 import uvicorn
 
-from .db import init_db
+from .db import create_recording, init_db, update_recording
+from .paths import get_recordings_dir
 from .tray.tray_icon import run_tray_icon
+from .watcher.audio_capture import CallRecording
 from .watcher.mic_watcher import MicWatcher
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("voice_recorder")
 
+_lock = threading.Lock()
+_current_recording: Optional[CallRecording] = None
+_current_recording_id: Optional[int] = None
 
-def on_call_start(active_apps: list[str]) -> None:
-    # TODO: disparar notificação com botão "Não gravar" e iniciar a captura
-    # de áudio (mic + loopback) assim que o módulo de gravação existir.
-    logger.info("Call detectada. Apps usando o microfone: %s", active_apps)
+
+def _derive_source_name(active_apps: List[str]) -> str:
+    """Extrai um rótulo legível (ex: "Teams.exe") do identificador bruto do
+    registro (ex: "NonPackaged\\C:\\...\\Teams.exe")."""
+    if not active_apps:
+        return "Desconhecido"
+    return active_apps[0].split("\\")[-1] or "Desconhecido"
+
+
+def on_call_start(active_apps: List[str]) -> None:
+    global _current_recording, _current_recording_id
+
+    with _lock:
+        if _current_recording is not None:
+            return
+
+        source_name = _derive_source_name(active_apps)
+        started_at = datetime.now()
+        base_name = f"{started_at.strftime('%Y-%m-%d_%Hh%M')}_{source_name}"
+        mic_path = get_recordings_dir() / f"{base_name}_mic.wav"
+        loopback_path = get_recordings_dir() / f"{base_name}_loopback.wav"
+
+        recording_id = create_recording(
+            mode="call", source_app=source_name, started_at=started_at.isoformat()
+        )
+        recording = CallRecording(mic_path, loopback_path)
+        recording.start()
+
+        _current_recording = recording
+        _current_recording_id = recording_id
+
+    logger.info("Call detectada (%s). Gravando mic+loopback separados.", source_name)
+    # TODO: disparar notificação com botão "Não gravar" (windows-toasts).
 
 
 def on_call_end() -> None:
-    # TODO: encerrar a captura de áudio em andamento e enfileirar para
-    # transcrição, quando o módulo de gravação existir.
-    logger.info("Call encerrada (microfone parou de ser usado).")
+    global _current_recording, _current_recording_id
+
+    with _lock:
+        recording, recording_id = _current_recording, _current_recording_id
+        _current_recording, _current_recording_id = None, None
+
+    if recording is None:
+        return
+
+    recording.stop()
+    update_recording(
+        recording_id,
+        ended_at=datetime.now().isoformat(),
+        status="recorded",
+        mic_path=str(recording.mic_path),
+        loopback_path=str(recording.loopback_path),
+    )
+    logger.info("Call encerrada. Gravação #%s salva.", recording_id)
+    # TODO: enfileirar para transcrição via API da OpenAI.
+
+
+def on_discard_current() -> None:
+    global _current_recording, _current_recording_id
+
+    with _lock:
+        recording, recording_id = _current_recording, _current_recording_id
+        _current_recording, _current_recording_id = None, None
+
+    if recording is None:
+        logger.info("Nenhuma gravação em andamento pra descartar.")
+        return
+
+    recording.discard()
+    update_recording(
+        recording_id, status="discarded", ended_at=datetime.now().isoformat()
+    )
+    logger.info("Gravação #%s descartada.", recording_id)
 
 
 def start_web_server() -> None:
@@ -51,7 +121,7 @@ def main() -> None:
 
     # O ícone da bandeja bloqueia a thread principal — web server e watcher
     # já rodam nas suas próprias threads em background.
-    run_tray_icon()
+    run_tray_icon(on_discard=on_discard_current)
 
 
 if __name__ == "__main__":

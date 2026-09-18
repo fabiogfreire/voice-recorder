@@ -26,9 +26,20 @@ na bandeja do sistema, tudo no mesmo processo.
 
 ## Status
 
-Fundação criada: config/chave de API, banco SQLite local, detecção de call
-via registro do microfone (Modo 1), UI básica com tela de Configurações.
+Modo 1 (call) funcionando ponta a ponta: detecção via registro do
+microfone, gravação de mic e loopback em trilhas WAV separadas
+(`soundcard`), salvamento em `%LOCALAPPDATA%\voice-recorder\recordings`,
+metadados no SQLite, descarte manual pela bandeja ("Descartar gravação
+atual"), config/chave de API e UI básica com tela de Configurações.
+Testado com fala real no mic e um tom de teste no loopback — ambos
+capturados sem cortes.
 
-Ainda faltam (próximos passos): captura de áudio mic+loopback (`soundcard`),
-notificação com botão "Não gravar", modo manual de conteúdo/aula (Modo 2),
-worker de transcrição (API OpenAI) e empacotamento em `.exe` (PyInstaller).
+Nota: o mic normalmente começa a gravar ~0,3 a 1s depois do loopback
+(latência de abertura do dispositivo WASAPI) — irrelevante pra calls
+longas, mas vale revisitar se a mesclagem por timestamp da transcrição
+exigir alinhamento mais fino.
+
+Ainda faltam (próximos passos): notificação com botão "Não gravar"
+(`windows-toasts`), modo manual de conteúdo/aula (Modo 2), worker de
+transcrição (API OpenAI, mesclagem Fabio/Outros por timestamp) e
+empacotamento em `.exe` (PyInstaller).

@@ -40,8 +40,13 @@ def _any_device_has_signal() -> bool:
 class PlaybackWatcher:
     """Poll periódico dos dispositivos de saída. Dispara `on_playback_start`
     quando detecta áudio por `consecutive_required` checagens seguidas (evita
-    notificar por causa de um som curto tipo notificação/beep), e reseta ao
-    voltar pro silêncio, permitindo notificar de novo na próxima vez."""
+    notificar por causa de um som curto tipo notificação/beep).
+
+    Só volta a notificar depois de `silence_reset_seconds` de silêncio
+    CONTÍNUO — não a cada checagem isolada sem sinal. Sem isso, uma pausa
+    normal de fala num vídeo (poucos segundos) já resetava o estado e fazia
+    a notificação aparecer de novo repetidamente durante o mesmo vídeo
+    (bug real relatado assistindo YouTube)."""
 
     def __init__(
         self,
@@ -49,12 +54,15 @@ class PlaybackWatcher:
         should_check: Callable[[], bool],
         poll_interval_seconds: float = 3.0,
         consecutive_required: int = 2,
+        silence_reset_seconds: float = 30.0,
     ):
         self.on_playback_start = on_playback_start
         self.should_check = should_check
         self.poll_interval_seconds = poll_interval_seconds
         self.consecutive_required = consecutive_required
+        self.silence_reset_checks = max(1, round(silence_reset_seconds / poll_interval_seconds))
         self._consecutive_active = 0
+        self._consecutive_silent = 0
         self._already_notified = False
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -72,9 +80,11 @@ class PlaybackWatcher:
         while not self._stop_event.is_set():
             if not self.should_check():
                 self._consecutive_active = 0
+                self._consecutive_silent = 0
                 self._already_notified = False
             elif _any_device_has_signal():
                 self._consecutive_active += 1
+                self._consecutive_silent = 0
                 if (
                     self._consecutive_active >= self.consecutive_required
                     and not self._already_notified
@@ -83,6 +93,8 @@ class PlaybackWatcher:
                     self.on_playback_start()
             else:
                 self._consecutive_active = 0
-                self._already_notified = False
+                self._consecutive_silent += 1
+                if self._consecutive_silent >= self.silence_reset_checks:
+                    self._already_notified = False
 
             self._stop_event.wait(self.poll_interval_seconds)

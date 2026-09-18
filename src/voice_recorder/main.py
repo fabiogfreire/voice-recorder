@@ -39,10 +39,19 @@ _current_content_recording_id: Optional[int] = None
 
 def _derive_source_name(active_apps: List[str]) -> str:
     """Extrai um rótulo legível (ex: "Teams.exe") do identificador bruto do
-    registro (ex: "NonPackaged\\C:\\...\\Teams.exe")."""
+    registro. Apps Win32 (NonPackaged) ficam com o caminho todo, mas com
+    '#' no lugar de barras (ex: "NonPackaged\\C:#Program Files#...#Teams.exe")
+    — testado com um app real; sem esse tratamento o nome vira o caminho
+    inteiro em vez de só "Teams.exe"."""
     if not active_apps:
         return "Desconhecido"
-    return active_apps[0].split("\\")[-1] or "Desconhecido"
+
+    label = active_apps[0]
+    prefix = "NonPackaged\\"
+    if label.startswith(prefix):
+        raw_path = label[len(prefix):]
+        return raw_path.split("#")[-1] or "Desconhecido"
+    return label or "Desconhecido"
 
 
 def on_call_start(active_apps: List[str]) -> None:

@@ -15,9 +15,23 @@ UI_URL = "http://localhost:8000"
 
 
 def _build_icon_image() -> Image.Image:
+    """Microfone estilizado em fundo escuro arredondado — mais legível na
+    bandeja (e mais "atual") do que uma bolinha vermelha lisa."""
     image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
-    draw.ellipse((8, 8, 56, 56), fill=(200, 40, 40, 255))
+
+    draw.rounded_rectangle((4, 4, 60, 60), radius=16, fill=(30, 32, 36, 255))
+
+    # Cápsula do microfone.
+    draw.rounded_rectangle((25, 14, 39, 38), radius=7, fill=(235, 60, 70, 255))
+
+    # Suporte (arco) por baixo da cápsula.
+    draw.arc((17, 22, 47, 46), start=0, end=180, fill=(255, 255, 255, 255), width=3)
+
+    # Haste e base.
+    draw.line((32, 46, 32, 52), fill=(255, 255, 255, 255), width=3)
+    draw.line((23, 52, 41, 52), fill=(255, 255, 255, 255), width=3)
+
     return image
 
 

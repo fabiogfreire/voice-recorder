@@ -23,6 +23,7 @@
             <td class="actions">
                 {% if r["status"] == "transcribed" %}
                 <a href="/recordings/{{ r['id'] }}/transcript" target="_blank">Ver transcrição</a>
+                <a href="/recordings/{{ r['id'] }}/transcript/download" class="icon-button" title="Baixar transcrição">💾</a>
                 {% elif r["status"] in ("recorded", "error") %}
                 <form method="post" action="/recordings/{{ r['id'] }}/transcribe">
                     <button type="submit">Transcrever</button>
@@ -30,7 +31,7 @@
                 {% endif %}
                 <form method="post" action="/recordings/{{ r['id'] }}/delete"
                       onsubmit="return confirm('Apagar esta gravação e os arquivos?');">
-                    <button type="submit" class="danger">Apagar</button>
+                    <button type="submit" class="icon-button" title="Apagar">🗑️</button>
                 </form>
             </td>
         </tr>

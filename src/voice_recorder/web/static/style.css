@@ -45,9 +45,16 @@ input, button {
 }
 
 td.actions form {
-    display: inline-block;
+    display: inline;
     max-width: none;
     margin-right: 0.5rem;
+}
+
+td.actions button {
+    padding: 0;
+    font-size: inherit;
+    background: none;
+    border: none;
 }
 
 .icon-button {

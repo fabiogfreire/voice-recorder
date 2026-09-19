@@ -1,14 +1,21 @@
-"""Caminhos usados pelo app, sempre em %LOCALAPPDATA%\\voice-recorder — assim
-funcionam igual em modo dev e depois de empacotado como .exe, sem depender
-de onde o executável está instalado."""
+"""Caminhos usados pelo app. Por padrão em %LOCALAPPDATA%\\voice-recorder —
+assim funcionam igual em modo dev e depois de empacotado como .exe, sem
+depender de onde o executável está instalado.
+
+Pra customizar (ex: usar uma pasta local do projeto em dev), defina a
+variável de ambiente VOICE_RECORDER_HOME=/caminho/desejado"""
 
 import os
 from pathlib import Path
 
 
 def get_app_data_dir() -> Path:
-    base = os.getenv("LOCALAPPDATA") or str(Path.home())
-    app_dir = Path(base) / "voice-recorder"
+    # Se VOICE_RECORDER_HOME está definida, usar ela como base
+    if custom_home := os.getenv("VOICE_RECORDER_HOME"):
+        app_dir = Path(custom_home)
+    else:
+        base = os.getenv("LOCALAPPDATA") or str(Path.home())
+        app_dir = Path(base) / "voice-recorder"
     app_dir.mkdir(parents=True, exist_ok=True)
     return app_dir
 

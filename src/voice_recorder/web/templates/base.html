@@ -14,5 +14,24 @@
     <main>
         {% block content %}{% endblock %}
     </main>
+    <script>
+        // Auto-refresh página a cada 3s se houver gravação em andamento
+        // (status "recording"). Sem refresh, a UI não mostra gravações
+        // ativas em tempo real até terminar.
+        function checkForActiveRecording() {
+            const statusCells = document.querySelectorAll('td:nth-child(4)');
+            for (const cell of statusCells) {
+                if (cell.textContent.includes('recording')) {
+                    setTimeout(() => location.reload(), 3000);
+                    return;
+                }
+            }
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', checkForActiveRecording);
+        } else {
+            checkForActiveRecording();
+        }
+    </script>
 </body>
 </html>

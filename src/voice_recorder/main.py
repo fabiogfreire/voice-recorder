@@ -130,7 +130,13 @@ def is_call_recording() -> bool:
 def on_playback_detected() -> None:
     """Áudio tocando sem nenhuma gravação em andamento — notifica com
     opção de gravar (opt-in: nem todo som que toca no PC merece virar
-    transcrição, por isso não grava direto como no Modo 1)."""
+    transcrição, por isso não grava direto como no Modo 1).
+
+    Verifica de novo se tem gravação ativa antes de notificar, pra evitar
+    disparar a notificação redundantemente se o usuário iniciou uma gravação
+    entre checagens do watcher."""
+    if is_call_recording() or is_content_recording():
+        return
     logger.info("Áudio detectado tocando. Notificando opção de gravar.")
     notify_playback_detected(on_record=on_content_toggle)
 

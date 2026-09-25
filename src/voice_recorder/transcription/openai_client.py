@@ -1,12 +1,14 @@
 """Cliente fino sobre a API de transcrição da OpenAI.
 
-Dois modelos, conforme testado com uma chave real:
-- `whisper-1` no Modo 1 (call): é o único que aceita `verbose_json` com
+Modelos configuráveis via `config.py` (`get_transcription_model_timestamps()`
+/ `get_transcription_model_plain()`), já que nem toda chave/projeto tem
+acesso aos mesmos modelos:
+- Modo 1 (call) precisa de um modelo que aceite `verbose_json` com
   timestamp por segmento — necessário pra mesclar mic (Fabio) e loopback
-  (Outros) em ordem cronológica. `gpt-transcribe` recusa esse
-  response_format (testado: erro 400 "not compatible").
-- `gpt-transcribe` no Modo 2 (conteúdo): trilha única, sem necessidade de
-  timestamp — mais novo e mais barato, usado como texto simples.
+  (Outros) em ordem cronológica. Hoje só `whisper-1` faz isso; outro
+  modelo configurado aqui vai falhar nessa chamada (erro 400 "not
+  compatible"), e o erro chega até a UI (ver `worker.py`).
+- Modo 2 (conteúdo): trilha única, sem necessidade de timestamp.
 
 A API tem limite de 25MB por arquivo. Em 16kHz mono isso dá ~13min de
 áudio — uma aula de 26min (caso real que motivou isso) já estoura. Trilhas
@@ -14,18 +16,30 @@ maiores que o limite são divididas em pedaços antes do envio, e os
 timestamps dos pedaços são realinhados pro tempo da gravação original.
 """
 
+import logging
 import shutil
 import tempfile
+import time
 import wave
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple
+from typing import Any, List, Tuple
 
 import numpy as np
-from openai import OpenAI
+from openai import APIConnectionError, OpenAI, PermissionDeniedError
 
-MODEL_WITH_TIMESTAMPS = "whisper-1"
-MODEL_PLAIN = "gpt-transcribe"
+from ..config import get_transcription_model_plain, get_transcription_model_timestamps
+
+logger = logging.getLogger("voice_recorder.transcription")
+
+# A OpenAI leva um tempo pra propagar mudanças de permissão de modelo (feito
+# no dashboard) por todos os nós que atendem a API — confirmado na prática:
+# depois de liberar um modelo, chamadas idênticas em sequência alternavam
+# entre sucesso e 403 PermissionDeniedError por vários minutos. O SDK não
+# reten essas por padrão (assume que 403 é permanente), então isso é feito
+# aqui manualmente. Erros de conexão entram na mesma lógica por serem
+# igualmente transitórios.
+_RETRY_DELAYS_SECONDS: Tuple[int, ...] = (2, 4, 8)
 
 # Abaixo disso, tratamos como silêncio/ruído de fundo, não fala de verdade.
 # Calibrado com testes reais: ruído de fundo típico fica na casa de 15-20,
@@ -40,14 +54,29 @@ _SILENCE_RMS_THRESHOLD = 30.0
 # Margem de segurança abaixo do limite real de 25MB da API.
 _MAX_CHUNK_BYTES = 24 * 1024 * 1024
 
+# WAVs de call podem chegar a centenas de MB (ex: gravação travada que
+# cresceu até 793MB) — carregar tudo de uma vez pra calcular o RMS já
+# causou MemoryError. Lendo em blocos, o pico de memória fica limitado
+# a um bloco (~2MB em int16 mono), não ao arquivo inteiro.
+_RMS_BLOCK_FRAMES = 1_000_000
+
 
 def has_audio_signal(path: Path) -> bool:
     with wave.open(str(path), "rb") as wav_file:
-        frames = wav_file.readframes(wav_file.getnframes())
-    if not frames:
+        if wav_file.getnframes() == 0:
+            return False
+        sum_squares = 0.0
+        sample_count = 0
+        while True:
+            frames = wav_file.readframes(_RMS_BLOCK_FRAMES)
+            if not frames:
+                break
+            data = np.frombuffer(frames, dtype=np.int16).astype(np.float64)
+            sum_squares += float(np.sum(data**2))
+            sample_count += data.size
+    if sample_count == 0:
         return False
-    data = np.frombuffer(frames, dtype=np.int16).astype(np.float64)
-    rms = float(np.sqrt(np.mean(data**2)))
+    rms = (sum_squares / sample_count) ** 0.5
     return rms >= _SILENCE_RMS_THRESHOLD
 
 
@@ -59,6 +88,28 @@ class TranscriptSegment:
 
 def _client(api_key: str) -> OpenAI:
     return OpenAI(api_key=api_key)
+
+
+def _create_transcription(client: OpenAI, **kwargs: Any):
+    total_attempts = len(_RETRY_DELAYS_SECONDS) + 1
+    audio_file = kwargs.get("file")
+    for attempt in range(total_attempts):
+        if attempt > 0 and hasattr(audio_file, "seek"):
+            audio_file.seek(0)
+        try:
+            return client.audio.transcriptions.create(**kwargs)
+        except (PermissionDeniedError, APIConnectionError) as exc:
+            if attempt == len(_RETRY_DELAYS_SECONDS):
+                raise
+            delay = _RETRY_DELAYS_SECONDS[attempt]
+            logger.warning(
+                "Transcrição falhou (tentativa %s/%s): %s — retentando em %ss.",
+                attempt + 1,
+                total_attempts,
+                exc,
+                delay,
+            )
+            time.sleep(delay)
 
 
 def _split_into_chunks(path: Path, max_bytes: int) -> Tuple[List[Tuple[Path, float]], Path]:
@@ -112,9 +163,10 @@ def transcribe_track(
         for chunk_path, offset_seconds in chunks:
             if with_timestamps:
                 with open(chunk_path, "rb") as audio_file:
-                    result = client.audio.transcriptions.create(
+                    result = _create_transcription(
+                        client,
                         file=audio_file,
-                        model=MODEL_WITH_TIMESTAMPS,
+                        model=get_transcription_model_timestamps(),
                         response_format="verbose_json",
                         timestamp_granularities=["segment"],
                     )
@@ -126,8 +178,11 @@ def transcribe_track(
                         )
             else:
                 with open(chunk_path, "rb") as audio_file:
-                    result = client.audio.transcriptions.create(
-                        file=audio_file, model=MODEL_PLAIN, response_format="text"
+                    result = _create_transcription(
+                        client,
+                        file=audio_file,
+                        model=get_transcription_model_plain(),
+                        response_format="text",
                     )
                 text = (
                     result if isinstance(result, str) else getattr(result, "text", "")

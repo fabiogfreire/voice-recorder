@@ -5,6 +5,7 @@ venv/
 .env
 data/
 *.db
+recordings/
 build/
 dist/
 *.spec

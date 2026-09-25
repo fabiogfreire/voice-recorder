@@ -53,7 +53,7 @@ def transcribe_recording(recording_id: int, api_key: str) -> None:
         logger.error("Gravação #%s não encontrada.", recording_id)
         return
 
-    update_recording(recording_id, status="transcribing")
+    update_recording(recording_id, status="transcribing", error_message=None)
 
     try:
         loopback_paths = [Path(p) for p in json.loads(row["loopback_path"])]
@@ -86,9 +86,9 @@ def transcribe_recording(recording_id: int, api_key: str) -> None:
             recording_id, status="transcribed", transcript_path=str(transcript_path)
         )
         logger.info("Gravação #%s transcrita em %s", recording_id, transcript_path)
-    except Exception:
+    except Exception as exc:
         logger.exception("Falha ao transcrever gravação #%s", recording_id)
-        update_recording(recording_id, status="error")
+        update_recording(recording_id, status="error", error_message=str(exc)[:500])
 
 
 def enqueue_transcription(recording_id: int) -> None:
@@ -97,12 +97,12 @@ def enqueue_transcription(recording_id: int) -> None:
     e pedir pra transcrever de novo pela UI."""
     api_key = get_openai_api_key()
     if not api_key:
-        logger.warning(
-            "Chave da OpenAI não configurada — gravação #%s aguardando "
-            "(configure em /settings e clique em Transcrever).",
-            recording_id,
+        message = (
+            "Chave da OpenAI não configurada — configure em /settings e "
+            "clique em Transcrever de novo."
         )
-        update_recording(recording_id, status="error")
+        logger.warning("Gravação #%s aguardando: %s", recording_id, message)
+        update_recording(recording_id, status="error", error_message=message)
         return
 
     thread = threading.Thread(

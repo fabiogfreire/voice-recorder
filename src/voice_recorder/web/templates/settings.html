@@ -3,6 +3,10 @@
 {% block content %}
 <h1>Configurações</h1>
 
+{% if message %}
+<p class="settings-message settings-message--{{ message_type }}">{{ message }}</p>
+{% endif %}
+
 <section>
     <h2>Chave da API da OpenAI</h2>
     {% if masked_key %}

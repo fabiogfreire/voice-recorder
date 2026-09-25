@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS recordings (
     status TEXT NOT NULL DEFAULT 'recording',  -- recording | discarded | recorded | transcribing | transcribed | error
     mic_path TEXT,
     loopback_path TEXT,
-    transcript_path TEXT
+    transcript_path TEXT,
+    error_message TEXT
 );
 """
 
@@ -35,6 +36,31 @@ def get_connection():
 def init_db() -> None:
     with get_connection() as conn:
         conn.execute(SCHEMA)
+        _migrate(conn)
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """`CREATE TABLE IF NOT EXISTS` não altera uma tabela já existente —
+    quem já tinha o banco antes da coluna `error_message` existir precisa
+    de um ALTER TABLE explícito."""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(recordings)")}
+    if "error_message" not in columns:
+        conn.execute("ALTER TABLE recordings ADD COLUMN error_message TEXT")
+
+
+def mark_stale_recordings_as_error() -> None:
+    """`recording`/`transcribing` só existem dentro de um processo vivo — se
+    uma linha está nesse estado quando o app sobe, é porque o processo
+    anterior foi encerrado (crash, fechado pelo Windows, etc.) no meio de
+    uma gravação ou transcrição. Chamar só no startup, nunca durante a
+    operação normal do app."""
+    message = "App encerrado durante a gravação/transcrição anterior."
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE recordings SET status = 'error', error_message = ? "
+            "WHERE status IN ('recording', 'transcribing')",
+            (message,),
+        )
 
 
 def list_recordings() -> list[sqlite3.Row]:

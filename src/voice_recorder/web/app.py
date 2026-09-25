@@ -4,13 +4,20 @@ segundo plano — só é aberta no navegador quando o Fabio quiser consultar."""
 
 import json
 from pathlib import Path
+from typing import Optional, Tuple
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from openai import OpenAI
 
-from ..config import get_openai_api_key, save_openai_api_key
+from ..config import (
+    get_openai_api_key,
+    get_transcription_model_plain,
+    get_transcription_model_timestamps,
+    save_openai_api_key,
+)
 from ..db import delete_recording, get_recording, list_recordings
 from ..transcription.worker import enqueue_transcription
 
@@ -87,8 +94,45 @@ def settings(request: Request):
     )
 
 
+def _validate_key(key: str) -> Tuple[str, str]:
+    """Chamada leve pra checar a chave (client.models.list()) e se o
+    projeto tem acesso aos modelos de transcrição configurados. Sem isso,
+    um 403 só aparece horas depois, no fim de uma call."""
+    try:
+        client = OpenAI(api_key=key)
+        available = sorted(m.id for m in client.models.list())
+    except Exception as exc:
+        return f"Chave inválida ou sem permissão: {exc}", "error"
+
+    needed = [get_transcription_model_timestamps(), get_transcription_model_plain()]
+    missing = [m for m in needed if m not in available]
+    if missing:
+        transcription_models = [
+            m for m in available if "transcribe" in m or m == "whisper-1"
+        ]
+        return (
+            "Chave válida, mas sem acesso aos modelos configurados: "
+            f"{', '.join(missing)}. Modelos de transcrição disponíveis neste "
+            f"projeto: {', '.join(transcription_models) or 'nenhum'}.",
+            "warning",
+        )
+    return "Chave válida — acesso aos modelos configurados confirmado.", "success"
+
+
 @app.post("/settings")
-def save_settings(openai_api_key: str = Form(...)):
-    if openai_api_key.strip():
-        save_openai_api_key(openai_api_key)
-    return RedirectResponse("/settings", status_code=303)
+def save_settings(request: Request, openai_api_key: str = Form(...)):
+    message: Optional[str] = None
+    message_type: Optional[str] = None
+
+    key = openai_api_key.strip()
+    if key:
+        save_openai_api_key(key)
+        message, message_type = _validate_key(key)
+
+    api_key = get_openai_api_key()
+    masked_key = f"sk-...{api_key[-4:]}" if api_key else None
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        {"masked_key": masked_key, "message": message, "message_type": message_type},
+    )

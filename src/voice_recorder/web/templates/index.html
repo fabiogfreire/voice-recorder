@@ -19,7 +19,13 @@
             <td>{{ r["started_at"] }}</td>
             <td>{{ r["mode"] }}</td>
             <td>{{ r["source_app"] or "Desconhecido" }}</td>
-            <td>{{ r["status"] }}</td>
+            <td>
+                {% if r["status"] == "error" and r["error_message"] %}
+                <span title="{{ r['error_message'] }}">error &#9432;</span>
+                {% else %}
+                {{ r["status"] }}
+                {% endif %}
+            </td>
             <td class="actions">
                 {% if r["status"] == "transcribed" %}
                 <a href="/recordings/{{ r['id'] }}/transcript" target="_blank">Ver transcrição</a>

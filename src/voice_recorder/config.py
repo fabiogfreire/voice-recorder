@@ -40,3 +40,20 @@ def save_openai_api_key(key: str) -> None:
     data = _read_config()
     data["openai_api_key"] = key.strip()
     _write_config(data)
+
+
+def get_transcription_model_timestamps() -> str:
+    """Modelo do Modo 1 (call), precisa suportar `verbose_json` com
+    timestamp por segmento. Só `whisper-1` faz isso hoje."""
+    env_value = os.getenv("TRANSCRIPTION_MODEL_TIMESTAMPS")
+    if env_value:
+        return env_value
+    return _read_config().get("transcription_model_timestamps") or "whisper-1"
+
+
+def get_transcription_model_plain() -> str:
+    """Modelo do Modo 2 (conteúdo), trilha única sem timestamp."""
+    env_value = os.getenv("TRANSCRIPTION_MODEL_PLAIN")
+    if env_value:
+        return env_value
+    return _read_config().get("transcription_model_plain") or "gpt-4o-transcribe"

@@ -8,15 +8,16 @@ import json
 import logging
 import threading
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from typing import List, Optional
 
 import uvicorn
 
-from .db import create_recording, init_db, update_recording
+from .db import create_recording, init_db, mark_stale_recordings_as_error, update_recording
 from .filenames import sanitize_for_filename
 from .notifications.call_notifier import notify_recording_started
 from .notifications.playback_notifier import notify_playback_detected
-from .paths import get_recordings_dir
+from .paths import get_app_data_dir, get_recordings_dir
 from .transcription.worker import enqueue_transcription
 from .tray.tray_icon import run_tray_icon
 from .watcher.active_window import get_active_window_title
@@ -25,7 +26,30 @@ from .watcher.mic_watcher import MicWatcher
 from .watcher.playback_watcher import PlaybackWatcher
 from .web.app import app as web_app
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+def _configure_logging() -> None:
+    """O .exe empacotado roda sem console — sem um handler em arquivo,
+    todo log se perde e não há como diagnosticar nada depois do fato."""
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+
+    file_handler = RotatingFileHandler(
+        get_app_data_dir() / "voice-recorder.log",
+        maxBytes=2 * 1024 * 1024,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(formatter)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
+
+
+_configure_logging()
 logger = logging.getLogger("voice_recorder")
 
 _lock = threading.Lock()
@@ -192,6 +216,7 @@ def start_web_server() -> None:
 
 def main() -> None:
     init_db()
+    mark_stale_recordings_as_error()
 
     web_thread = threading.Thread(target=start_web_server, daemon=True)
     web_thread.start()

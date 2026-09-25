@@ -73,6 +73,27 @@ td.actions button {
     height: 18px;
 }
 
+.settings-message {
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    max-width: 40rem;
+}
+
+.settings-message--error {
+    background: #e5484d22;
+    border: 1px solid #e5484d88;
+}
+
+.settings-message--warning {
+    background: #f5a52322;
+    border: 1px solid #f5a52388;
+}
+
+.settings-message--success {
+    background: #30a46c22;
+    border: 1px solid #30a46c88;
+}
+
 pre {
     white-space: pre-wrap;
     word-wrap: break-word;

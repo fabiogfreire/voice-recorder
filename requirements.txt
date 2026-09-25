@@ -8,3 +8,4 @@ pystray
 Pillow
 windows-toasts
 openai
+pycaw

@@ -22,6 +22,7 @@ from .transcription.worker import enqueue_transcription
 from .tray.tray_icon import run_tray_icon
 from .watcher.active_window import get_active_window_title
 from .watcher.audio_capture import CallRecording, ContentRecording
+from .watcher.audio_muter import AudioMuter
 from .watcher.mic_watcher import MicWatcher
 from .watcher.playback_watcher import PlaybackWatcher
 from .web.app import app as web_app
@@ -60,6 +61,8 @@ _content_lock = threading.Lock()
 _current_content_recording: Optional[ContentRecording] = None
 _current_content_recording_id: Optional[int] = None
 
+_audio_muter = AudioMuter()
+
 
 def _derive_source_name(active_apps: List[str]) -> str:
     """Extrai um rótulo legível (ex: "Teams.exe") do identificador bruto do
@@ -85,6 +88,8 @@ def on_call_start(active_apps: List[str]) -> None:
         if _current_recording is not None:
             return
 
+        _audio_muter.mute_other_apps(active_apps)
+
         source_name = _derive_source_name(active_apps)
         started_at = datetime.now()
         base_name = f"{started_at.strftime('%Y-%m-%d_%Hh%M')}_{source_name}"
@@ -109,6 +114,8 @@ def on_call_end() -> None:
     with _lock:
         recording, recording_id = _current_recording, _current_recording_id
         _current_recording, _current_recording_id = None, None
+
+    _audio_muter.restore_muted_apps()
 
     if recording is None:
         return

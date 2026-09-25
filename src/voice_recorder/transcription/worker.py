@@ -6,17 +6,23 @@ loopback, sem tags (não é conversa)."""
 import json
 import logging
 import re
+import shutil
 import threading
 from pathlib import Path
 from typing import List, Tuple
 
 from ..config import get_openai_api_key
 from ..db import get_recording, update_recording
-from .openai_client import TranscriptSegment, transcribe_track
+from .openai_client import TranscriptSegment, _extract_clip, transcribe_track
 
 logger = logging.getLogger("voice_recorder.transcription")
 
 _LOOPBACK_SUFFIX_RE = re.compile(r"_loopback_.*\.wav$")
+
+# Decisão do Fabio (SPEC-transcricao-sob-demanda.md): 1 minuto contado do
+# início da gravação, suficiente pra responder "é essa gravação?" sem
+# ouvir o áudio.
+_PREVIEW_DURATION_SECONDS = 60.0
 
 
 def _format_timestamp(seconds: float) -> str:
@@ -89,6 +95,59 @@ def transcribe_recording(recording_id: int, api_key: str) -> None:
     except Exception as exc:
         logger.exception("Falha ao transcrever gravação #%s", recording_id)
         update_recording(recording_id, status="error", error_message=str(exc)[:500])
+
+
+def transcribe_preview(recording_id: int, api_key: str) -> None:
+    """Transcreve só o primeiro minuto de cada trilha com sinal — mesmo
+    caminho da transcrição completa (`transcribe_recording`), só que sobre
+    clipes recortados. Diferença central: **nunca muda `status`**. A
+    gravação segue `recorded` (ou o que já era) e continua elegível pra
+    transcrição completa depois — erro aqui vira só `error_message`, sem
+    derrubar o status (SPEC-transcricao-sob-demanda.md)."""
+    row = get_recording(recording_id)
+    if row is None:
+        logger.error("Gravação #%s não encontrada.", recording_id)
+        return
+
+    clip_dirs: List[Path] = []
+    try:
+        loopback_paths = (
+            [Path(p) for p in json.loads(row["loopback_path"])]
+            if row["loopback_path"]
+            else []
+        )
+
+        def _clip(path: Path) -> Path:
+            clip_path = _extract_clip(path, 0.0, _PREVIEW_DURATION_SECONDS)
+            clip_dirs.append(clip_path.parent)
+            return clip_path
+
+        if row["mode"] == "call":
+            mic_segments = transcribe_track(
+                _clip(Path(row["mic_path"])), api_key, with_timestamps=True
+            )
+            loopback_segments: List[TranscriptSegment] = []
+            for path in loopback_paths:
+                loopback_segments.extend(
+                    transcribe_track(_clip(path), api_key, with_timestamps=True)
+                )
+            preview_text = _merge_call_segments(mic_segments, loopback_segments)
+        else:
+            loopback_segments = []
+            for path in loopback_paths:
+                loopback_segments.extend(
+                    transcribe_track(_clip(path), api_key, with_timestamps=False)
+                )
+            preview_text = _render_content_transcript(loopback_segments)
+
+        update_recording(recording_id, preview_text=preview_text, error_message=None)
+        logger.info("Prévia gerada pra gravação #%s.", recording_id)
+    except Exception as exc:
+        logger.exception("Falha ao gerar prévia da gravação #%s", recording_id)
+        update_recording(recording_id, error_message=str(exc)[:500])
+    finally:
+        for clip_dir in clip_dirs:
+            shutil.rmtree(clip_dir, ignore_errors=True)
 
 
 def enqueue_transcription(recording_id: int) -> None:

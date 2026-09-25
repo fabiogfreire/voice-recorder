@@ -7,9 +7,11 @@ segundo plano — não precisa ser "iniciado" manualmente além de rodar isto
 import json
 import logging
 import threading
+import wave
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
-from typing import List, Optional
+from pathlib import Path
+from typing import List, Optional, Tuple
 
 import uvicorn
 
@@ -18,7 +20,7 @@ from .filenames import sanitize_for_filename
 from .notifications.call_notifier import notify_recording_started
 from .notifications.playback_notifier import notify_playback_detected
 from .paths import get_app_data_dir, get_recordings_dir
-from .transcription.worker import enqueue_transcription
+from .transcription.openai_client import has_audio_signal
 from .tray.tray_icon import run_tray_icon
 from .watcher.active_window import get_active_window_title
 from .watcher.audio_capture import CallRecording, ContentRecording
@@ -81,6 +83,29 @@ def _derive_source_name(active_apps: List[str]) -> str:
     return label or "Desconhecido"
 
 
+def _compute_recording_stats(
+    mode: str, mic_path: Optional[Path], loopback_paths: List[Path]
+) -> Tuple[Optional[float], int]:
+    """Calcula duração e trilhas cobráveis 1x, ao fechar a gravação — não
+    a cada page load da UI, que recarrega sozinha a cada 3s
+    (SPEC-transcricao-sob-demanda.md). Duração vem só do header do WAV
+    (getnframes()/getframerate()), sem ler o áudio; mic e loopback são
+    gravados em paralelo e param juntos, então a duração de uma trilha já
+    representa a gravação inteira. `billable_tracks` conta quantas
+    trilhas têm sinal de verdade (`has_audio_signal`, já em blocos —
+    P2 da SPEC.md — pra não estourar memória em WAVs grandes)."""
+    tracks = ([mic_path] if mic_path else []) + list(loopback_paths)
+    billable_tracks = sum(1 for path in tracks if path.exists() and has_audio_signal(path))
+
+    duration_path = mic_path if mode == "call" else (loopback_paths[0] if loopback_paths else None)
+    duration_seconds = None
+    if duration_path is not None and duration_path.exists():
+        with wave.open(str(duration_path), "rb") as wav_file:
+            duration_seconds = wav_file.getnframes() / wav_file.getframerate()
+
+    return duration_seconds, billable_tracks
+
+
 def on_call_start(active_apps: List[str]) -> None:
     global _current_recording, _current_recording_id
 
@@ -121,15 +146,19 @@ def on_call_end() -> None:
         return
 
     recording.stop()
+    duration_seconds, billable_tracks = _compute_recording_stats(
+        "call", recording.mic_path, recording.loopback_paths
+    )
     update_recording(
         recording_id,
         ended_at=datetime.now().isoformat(),
         status="recorded",
         mic_path=str(recording.mic_path),
         loopback_path=json.dumps([str(p) for p in recording.loopback_paths]),
+        duration_seconds=duration_seconds,
+        billable_tracks=billable_tracks,
     )
-    logger.info("Call encerrada. Gravação #%s salva.", recording_id)
-    enqueue_transcription(recording_id)
+    logger.info("Call encerrada. Gravação #%s salva (aguardando decisão de transcrever).", recording_id)
 
 
 def on_discard_current() -> None:
@@ -202,14 +231,18 @@ def on_content_toggle() -> None:
         _current_content_recording_id = None
 
     recording.stop()
+    duration_seconds, billable_tracks = _compute_recording_stats(
+        "content", None, recording.loopback_paths
+    )
     update_recording(
         recording_id,
         ended_at=datetime.now().isoformat(),
         status="recorded",
         loopback_path=json.dumps([str(p) for p in recording.loopback_paths]),
+        duration_seconds=duration_seconds,
+        billable_tracks=billable_tracks,
     )
-    logger.info("Gravação de conteúdo #%s salva.", recording_id)
-    enqueue_transcription(recording_id)
+    logger.info("Gravação de conteúdo #%s salva (aguardando decisão de transcrever).", recording_id)
 
 
 def start_web_server() -> None:

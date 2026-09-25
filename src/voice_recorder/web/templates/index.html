@@ -10,6 +10,8 @@
             <th>Modo</th>
             <th>Origem</th>
             <th>Status</th>
+            <th>Duração</th>
+            <th>Custo</th>
             <th>Ação</th>
         </tr>
     </thead>
@@ -26,6 +28,16 @@
                 {{ r["status"] }}
                 {% endif %}
             </td>
+            <td>
+                {% set duration = format_duration_minutes(r["duration_seconds"]) %}
+                {% if duration %}{{ duration }} min{% else %}—{% endif %}
+            </td>
+            <td>
+                {% if r["status"] == "recorded" %}
+                {% set cost = format_cost_usd(r["duration_seconds"], r["billable_tracks"]) %}
+                {% if cost %}~US$ {{ cost }}{% else %}—{% endif %}
+                {% endif %}
+            </td>
             <td class="actions">
                 {% if r["status"] == "transcribed" %}
                 <a href="/recordings/{{ r['id'] }}/transcript" target="_blank">Ver transcrição</a>
@@ -37,6 +49,11 @@
                     <button type="submit">Transcrever</button>
                 </form>
                 {% endif %}
+                {% if r["status"] == "recorded" and not r["preview_text"] %}
+                <form method="post" action="/recordings/{{ r['id'] }}/preview">
+                    <button type="submit">Prévia</button>
+                </form>
+                {% endif %}
                 <form method="post" action="/recordings/{{ r['id'] }}/delete"
                       onsubmit="return confirm('Apagar esta gravação e os arquivos?');">
                     <button type="submit" class="icon-button" title="Apagar">
@@ -45,6 +62,16 @@
                 </form>
             </td>
         </tr>
+        {% if r["preview_text"] %}
+        <tr class="preview-row">
+            <td colspan="7">
+                <details>
+                    <summary>Ver prévia (1º minuto)</summary>
+                    <pre>{{ r["preview_text"] }}</pre>
+                </details>
+            </td>
+        </tr>
+        {% endif %}
         {% endfor %}
     </tbody>
 </table>

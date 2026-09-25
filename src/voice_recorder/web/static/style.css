@@ -101,3 +101,17 @@ pre {
     padding: 1rem;
     border-radius: 6px;
 }
+
+tr.preview-row td {
+    border-top: none;
+    padding-top: 0;
+}
+
+tr.preview-row summary {
+    cursor: pointer;
+    opacity: 0.8;
+}
+
+tr.preview-row pre {
+    margin-top: 0.5rem;
+}

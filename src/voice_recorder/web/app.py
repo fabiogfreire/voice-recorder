@@ -18,14 +18,35 @@ from ..config import (
     get_transcription_model_timestamps,
     save_openai_api_key,
 )
-from ..db import delete_recording, get_recording, list_recordings
-from ..transcription.worker import enqueue_transcription
+from ..db import delete_recording, get_recording, list_recordings, update_recording
+from ..transcription.openai_client import estimate_cost_usd
+from ..transcription.worker import enqueue_transcription, transcribe_preview
 
 BASE_DIR = Path(__file__).parent
 
 app = FastAPI(title="Voice Recorder")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+
+
+def _format_duration_minutes(seconds: Optional[float]) -> Optional[str]:
+    if seconds is None:
+        return None
+    return f"{seconds / 60:.1f}".replace(".", ",")
+
+
+def _format_cost_usd(seconds: Optional[float], track_count: Optional[int]) -> Optional[str]:
+    if seconds is None or not track_count:
+        return None
+    return f"{estimate_cost_usd(seconds, track_count):.2f}".replace(".", ",")
+
+
+# Registrados como globais do Jinja em vez de pré-calculados em `index()`
+# pra manter a linha da tabela simples de ler no template — a lógica de
+# formatação (duração some quando não calculada, custo some fora do
+# status "recorded") já vive nos próprios helpers acima.
+templates.env.globals["format_duration_minutes"] = _format_duration_minutes
+templates.env.globals["format_cost_usd"] = _format_cost_usd
 
 
 @app.get("/")
@@ -41,6 +62,29 @@ def transcribe(recording_id: int):
     if get_recording(recording_id) is None:
         raise HTTPException(status_code=404)
     enqueue_transcription(recording_id)
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/recordings/{recording_id}/preview")
+def preview(recording_id: int):
+    """Transcreve só o primeiro minuto — síncrono de propósito (ao
+    contrário de /transcribe, que roda em background): um clipe de 60s
+    leva poucos segundos na API, e a UI precisa do resultado pronto no
+    redirect pra trocar o botão "Prévia" por "Ver prévia" na mesma
+    requisição, sem depender do auto-refresh de 3s (que só dispara pra
+    status "recording", ver base.html)."""
+    if get_recording(recording_id) is None:
+        raise HTTPException(status_code=404)
+
+    api_key = get_openai_api_key()
+    if not api_key:
+        update_recording(
+            recording_id,
+            error_message="Chave da OpenAI não configurada — configure em /settings.",
+        )
+        return RedirectResponse("/", status_code=303)
+
+    transcribe_preview(recording_id, api_key)
     return RedirectResponse("/", status_code=303)
 
 

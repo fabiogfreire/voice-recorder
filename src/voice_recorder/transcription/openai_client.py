@@ -54,6 +54,12 @@ _SILENCE_RMS_THRESHOLD = 30.0
 # Margem de segurança abaixo do limite real de 25MB da API.
 _MAX_CHUNK_BYTES = 24 * 1024 * 1024
 
+# Preço por minuto de áudio transcrito — vale pra whisper-1 e pra
+# gpt-4o-transcribe (mesma tabela de preço da OpenAI pra transcrição;
+# ver SPEC-transcricao-sob-demanda.md). Só uma estimativa: não cobre
+# eventuais mudanças de preço nem descontos por volume.
+_USD_PER_MINUTE = 0.006
+
 # WAVs de call podem chegar a centenas de MB (ex: gravação travada que
 # cresceu até 793MB) — carregar tudo de uma vez pra calcular o RMS já
 # causou MemoryError. Lendo em blocos, o pico de memória fica limitado
@@ -78,6 +84,18 @@ def has_audio_signal(path: Path) -> bool:
         return False
     rms = (sum_squares / sample_count) ** 0.5
     return rms >= _SILENCE_RMS_THRESHOLD
+
+
+def estimate_cost_usd(duration_seconds: float, track_count: int) -> float:
+    """Estimativa de custo pra transcrever `track_count` trilhas, cada uma
+    com `duration_seconds` de duração. Mic e loopback são gravados em
+    paralelo e param juntos, então têm (aproximadamente) a mesma duração —
+    por isso um único `duration_seconds` multiplicado pelo número de
+    trilhas já cobre o total. Trilhas mudas não entram em `track_count`
+    (ver `billable_tracks`, calculado com `has_audio_signal` ao fechar a
+    gravação)."""
+    minutes = duration_seconds / 60.0
+    return minutes * track_count * _USD_PER_MINUTE
 
 
 @dataclass
@@ -147,6 +165,36 @@ def _split_into_chunks(path: Path, max_bytes: int) -> Tuple[List[Tuple[Path, flo
             chunk_index += 1
 
         return chunks, tmp_dir
+
+
+def _extract_clip(path: Path, start_seconds: float, duration_seconds: float) -> Path:
+    """Recorta um trecho de `path` (a partir de `start_seconds`, com até
+    `duration_seconds` de duração) num WAV temporário — usado pra prévia
+    (SPEC-transcricao-sob-demanda.md). Mesma mecânica de `setpos()` +
+    `readframes()` do `_split_into_chunks()`: lê só o trecho pedido, não o
+    arquivo inteiro. Cabe ao chamador apagar `clip_path.parent` quando
+    terminar (mesmo padrão de `tmp_dir` usado em `transcribe_track`)."""
+    with wave.open(str(path), "rb") as wav_file:
+        n_channels = wav_file.getnchannels()
+        sampwidth = wav_file.getsampwidth()
+        framerate = wav_file.getframerate()
+        n_frames = wav_file.getnframes()
+
+        start_frame = min(int(start_seconds * framerate), n_frames)
+        frame_count = max(0, min(int(duration_seconds * framerate), n_frames - start_frame))
+
+        wav_file.setpos(start_frame)
+        data = wav_file.readframes(frame_count)
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="voice_recorder_preview_"))
+    clip_path = tmp_dir / "clip.wav"
+    with wave.open(str(clip_path), "wb") as clip_file:
+        clip_file.setnchannels(n_channels)
+        clip_file.setsampwidth(sampwidth)
+        clip_file.setframerate(framerate)
+        clip_file.writeframes(data)
+
+    return clip_path
 
 
 def transcribe_track(

@@ -17,7 +17,10 @@ CREATE TABLE IF NOT EXISTS recordings (
     mic_path TEXT,
     loopback_path TEXT,
     transcript_path TEXT,
-    error_message TEXT
+    error_message TEXT,
+    duration_seconds REAL,                     -- calculado 1x ao fechar a gravação (header do WAV, sem ler áudio)
+    billable_tracks INTEGER,                   -- trilhas com sinal de verdade (has_audio_signal), pra estimar custo
+    preview_text TEXT                          -- transcrição do primeiro minuto, sob demanda — não altera `status`
 );
 """
 
@@ -39,13 +42,24 @@ def init_db() -> None:
         _migrate(conn)
 
 
+_MIGRATED_COLUMNS = {
+    "error_message": "TEXT",
+    "duration_seconds": "REAL",
+    "billable_tracks": "INTEGER",
+    "preview_text": "TEXT",
+}
+
+
 def _migrate(conn: sqlite3.Connection) -> None:
     """`CREATE TABLE IF NOT EXISTS` não altera uma tabela já existente —
-    quem já tinha o banco antes da coluna `error_message` existir precisa
-    de um ALTER TABLE explícito."""
+    quem já tinha o banco antes de uma coluna nova existir precisa de um
+    ALTER TABLE explícito. Toda coluna adicionada depois da criação
+    original da tabela entra em `_MIGRATED_COLUMNS`, em vez de criar um
+    novo mecanismo de migração a cada spec."""
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(recordings)")}
-    if "error_message" not in columns:
-        conn.execute("ALTER TABLE recordings ADD COLUMN error_message TEXT")
+    for name, col_type in _MIGRATED_COLUMNS.items():
+        if name not in columns:
+            conn.execute(f"ALTER TABLE recordings ADD COLUMN {name} {col_type}")
 
 
 def mark_stale_recordings_as_error() -> None:

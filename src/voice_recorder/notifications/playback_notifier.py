@@ -12,12 +12,15 @@ from typing import Callable
 
 from windows_toasts import InteractableWindowsToaster, Toast, ToastActivatedEventArgs, ToastButton
 
+from . import APP_USER_MODEL_ID
+
 APP_NAME = "Voice Recorder"
 _RECORD_ARGUMENT = "record"
 _DECLINE_ARGUMENT = "decline"
 
 logger = logging.getLogger("voice_recorder")
-_toaster = InteractableWindowsToaster(APP_NAME)
+# notifierAUMID explícito — ver notifications/__init__.py.
+_toaster = InteractableWindowsToaster(APP_NAME, notifierAUMID=APP_USER_MODEL_ID)
 
 
 def notify_playback_detected(on_record: Callable[[], None]) -> None:
@@ -26,6 +29,8 @@ def notify_playback_detected(on_record: Callable[[], None]) -> None:
             on_record()
         elif args.arguments == _DECLINE_ARGUMENT:
             logger.info("Notificação de áudio detectado recusada.")
+        else:
+            logger.info("Notificação de áudio ativada com argumento inesperado: %r.", args.arguments)
 
     toast = Toast(
         [

@@ -20,7 +20,9 @@ CREATE TABLE IF NOT EXISTS recordings (
     error_message TEXT,
     duration_seconds REAL,                     -- calculado 1x ao fechar a gravação (header do WAV, sem ler áudio)
     billable_tracks INTEGER,                   -- trilhas com sinal de verdade (has_audio_signal), pra estimar custo
-    preview_text TEXT                          -- transcrição do primeiro minuto, sob demanda — não altera `status`
+    preview_text TEXT,                         -- transcrição do primeiro minuto, sob demanda — não altera `status`
+    participants TEXT,                         -- JSON: nomes capturados via UI Automation; [] se falhou/não achou
+    participants_identified INTEGER NOT NULL DEFAULT 0  -- Mecanismo B (heurística por LLM) já rodou nesta gravação?
 );
 """
 
@@ -47,6 +49,8 @@ _MIGRATED_COLUMNS = {
     "duration_seconds": "REAL",
     "billable_tracks": "INTEGER",
     "preview_text": "TEXT",
+    "participants": "TEXT",
+    "participants_identified": "INTEGER NOT NULL DEFAULT 0",
 }
 
 

@@ -21,11 +21,12 @@ from .notifications.call_notifier import notify_recording_started
 from .notifications.playback_notifier import notify_playback_detected
 from .paths import get_app_data_dir, get_recordings_dir
 from .transcription.openai_client import has_audio_signal
-from .tray.tray_icon import run_tray_icon
+from .tray.tray_icon import refresh_menu, run_tray_icon
 from .watcher.active_window import get_active_window_title
 from .watcher.audio_capture import CallRecording, ContentRecording
 from .watcher.audio_muter import AudioMuter
 from .watcher.mic_watcher import MicWatcher
+from .watcher.participants import watch_participants
 from .watcher.playback_watcher import PlaybackWatcher
 from .web.app import app as web_app
 
@@ -64,6 +65,21 @@ _current_content_recording: Optional[ContentRecording] = None
 _current_content_recording_id: Optional[int] = None
 
 _audio_muter = AudioMuter()
+
+# Nomes capturados via UI Automation pra call em andamento (ver
+# watcher/participants.py) — separado de _current_recording porque a
+# captura roda em thread própria, sem correr o risco de atrasar o começo
+# da gravação (UI Automation pode levar segundos, e cada frame de áudio
+# perdido nesse meio tempo é perdido de verdade).
+_participants_lock = threading.Lock()
+_current_participants: List[str] = []
+
+# Intervalo do polling contínuo durante a call inteira (não só uma janela
+# fixa no início) — testado ao vivo numa call real: a outra pessoa levou
+# quase 2 minutos pra entrar (precisou de ajuda por telefone), e uma
+# tentativa única logo no início simplesmente não a via. Ver
+# watcher/participants.py:watch_participants.
+_PARTICIPANTS_POLL_INTERVAL_SECONDS = 8.0
 
 
 def _derive_source_name(active_apps: List[str]) -> str:
@@ -106,8 +122,35 @@ def _compute_recording_stats(
     return duration_seconds, billable_tracks
 
 
+def _capture_participants_async(source_app: str, recording_id: int) -> None:
+    """Roda em thread própria — nunca no caminho crítico de começar a
+    gravar (ver comentário de `_current_participants`). Faz polling
+    durante a call inteira (`watch_participants`), atualizando
+    `_current_participants` a cada nome novo encontrado — não dá pra
+    esperar o polling acabar pra escrever o resultado: `on_call_end` lê
+    `_current_participants` assim que a call termina, então a escrita
+    tem que já estar feita antes disso, não depois."""
+    global _current_participants
+
+    def _should_continue() -> bool:
+        return _current_recording_id == recording_id
+
+    def _on_update(names: List[str]) -> None:
+        global _current_participants
+        with _participants_lock:
+            _current_participants = names
+        logger.info("Participantes identificados: %s.", ", ".join(names))
+
+    watch_participants(
+        source_app,
+        should_continue=_should_continue,
+        on_update=_on_update,
+        interval_seconds=_PARTICIPANTS_POLL_INTERVAL_SECONDS,
+    )
+
+
 def on_call_start(active_apps: List[str]) -> None:
-    global _current_recording, _current_recording_id
+    global _current_recording, _current_recording_id, _current_participants
 
     with _lock:
         if _current_recording is not None:
@@ -129,6 +172,14 @@ def on_call_start(active_apps: List[str]) -> None:
         _current_recording = recording
         _current_recording_id = recording_id
 
+        with _participants_lock:
+            _current_participants = []
+        threading.Thread(
+            target=_capture_participants_async,
+            args=(source_name, recording_id),
+            daemon=True,
+        ).start()
+
     logger.info("Call detectada (%s). Gravando mic+loopback separados.", source_name)
     notify_recording_started(source_name, on_discard=on_discard_current)
 
@@ -149,6 +200,8 @@ def on_call_end() -> None:
     duration_seconds, billable_tracks = _compute_recording_stats(
         "call", recording.mic_path, recording.loopback_paths
     )
+    with _participants_lock:
+        participants = _current_participants
     update_recording(
         recording_id,
         ended_at=datetime.now().isoformat(),
@@ -157,6 +210,7 @@ def on_call_end() -> None:
         loopback_path=json.dumps([str(p) for p in recording.loopback_paths]),
         duration_seconds=duration_seconds,
         billable_tracks=billable_tracks,
+        participants=json.dumps(participants),
     )
     logger.info("Call encerrada. Gravação #%s salva (aguardando decisão de transcrever).", recording_id)
 
@@ -223,6 +277,7 @@ def on_content_toggle() -> None:
             _current_content_recording = recording
             _current_content_recording_id = recording_id
             logger.info("Gravação de conteúdo iniciada (%s).", source_name)
+            refresh_menu()
             return
 
         recording = _current_content_recording
@@ -243,6 +298,7 @@ def on_content_toggle() -> None:
         billable_tracks=billable_tracks,
     )
     logger.info("Gravação de conteúdo #%s salva (aguardando decisão de transcrever).", recording_id)
+    refresh_menu()
 
 
 def start_web_server() -> None:

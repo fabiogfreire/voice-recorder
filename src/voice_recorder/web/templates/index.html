@@ -20,7 +20,13 @@
         <tr>
             <td>{{ r["started_at"] }}</td>
             <td>{{ r["mode"] }}</td>
-            <td>{{ r["source_app"] or "Desconhecido" }}</td>
+            <td>
+                {{ r["source_app"] or "Desconhecido" }}
+                {% set participants = parse_participants(r["participants"]) %}
+                {% if participants %}
+                <br><small>{{ participants | join(", ") }}</small>
+                {% endif %}
+            </td>
             <td>
                 {% if r["status"] == "error" and r["error_message"] %}
                 <span title="{{ r['error_message'] }}">error &#9432;</span>
@@ -44,6 +50,11 @@
                 <a href="/recordings/{{ r['id'] }}/transcript/download" class="icon-button" title="Baixar transcrição">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                 </a>
+                {% if participants|length >= 2 and not r["participants_identified"] %}
+                <form method="post" action="/recordings/{{ r['id'] }}/identify-participants">
+                    <button type="submit" title="Palpite por contexto: tenta trocar algumas linhas de &quot;Outros&quot; pelo nome mais provável — pode errar">Identificar participantes</button>
+                </form>
+                {% endif %}
                 {% elif r["status"] in ("recorded", "error") %}
                 <form method="post" action="/recordings/{{ r['id'] }}/transcribe">
                     <button type="submit">Transcrever</button>

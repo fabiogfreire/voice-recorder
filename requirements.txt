@@ -9,3 +9,5 @@ Pillow
 windows-toasts
 openai
 pycaw
+uiautomation
+psutil

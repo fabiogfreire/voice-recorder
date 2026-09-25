@@ -4,7 +4,7 @@ segundo plano — só é aberta no navegador quando o Fabio quiser consultar."""
 
 import json
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse
@@ -19,7 +19,7 @@ from ..config import (
     save_openai_api_key,
 )
 from ..db import delete_recording, get_recording, list_recordings, update_recording
-from ..transcription.openai_client import estimate_cost_usd
+from ..transcription.openai_client import estimate_cost_usd, identify_participants_in_transcript
 from ..transcription.worker import enqueue_transcription, transcribe_preview
 
 BASE_DIR = Path(__file__).parent
@@ -41,12 +41,22 @@ def _format_cost_usd(seconds: Optional[float], track_count: Optional[int]) -> Op
     return f"{estimate_cost_usd(seconds, track_count):.2f}".replace(".", ",")
 
 
+def _parse_participants(value: Optional[str]) -> List[str]:
+    if not value:
+        return []
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
 # Registrados como globais do Jinja em vez de pré-calculados em `index()`
 # pra manter a linha da tabela simples de ler no template — a lógica de
 # formatação (duração some quando não calculada, custo some fora do
 # status "recorded") já vive nos próprios helpers acima.
 templates.env.globals["format_duration_minutes"] = _format_duration_minutes
 templates.env.globals["format_cost_usd"] = _format_cost_usd
+templates.env.globals["parse_participants"] = _parse_participants
 
 
 @app.get("/")
@@ -85,6 +95,40 @@ def preview(recording_id: int):
         return RedirectResponse("/", status_code=303)
 
     transcribe_preview(recording_id, api_key)
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/recordings/{recording_id}/identify-participants")
+def identify_participants(recording_id: int):
+    """Mecanismo B (SPEC-identificacao-participantes.md): best-effort, só
+    faz sentido com 2+ participantes capturados (call em grupo) e um
+    transcript completo já pronto pra reescrever. Síncrono como /preview —
+    é uma única chamada de texto, rápida."""
+    row = get_recording(recording_id)
+    if row is None or not row["transcript_path"]:
+        raise HTTPException(status_code=404)
+
+    participants = json.loads(row["participants"]) if row["participants"] else []
+    if len(participants) < 2 or row["participants_identified"]:
+        return RedirectResponse("/", status_code=303)  # nada a fazer
+
+    api_key = get_openai_api_key()
+    if not api_key:
+        update_recording(
+            recording_id,
+            error_message="Chave da OpenAI não configurada — configure em /settings.",
+        )
+        return RedirectResponse("/", status_code=303)
+
+    transcript_path = Path(row["transcript_path"])
+    try:
+        original_text = transcript_path.read_text(encoding="utf-8")
+        updated_text = identify_participants_in_transcript(original_text, participants, api_key)
+        transcript_path.write_text(updated_text, encoding="utf-8")
+        update_recording(recording_id, participants_identified=1, error_message=None)
+    except Exception as exc:
+        update_recording(recording_id, error_message=str(exc)[:500])
+
     return RedirectResponse("/", status_code=303)
 
 

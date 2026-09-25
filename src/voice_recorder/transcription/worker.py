@@ -9,7 +9,7 @@ import re
 import shutil
 import threading
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from ..config import get_openai_api_key
 from ..db import get_recording, update_recording
@@ -37,16 +37,37 @@ def _content_transcript_path(loopback_paths: List[Path]) -> Path:
 
 
 def _merge_call_segments(
-    mic_segments: List[TranscriptSegment], loopback_segments: List[TranscriptSegment]
+    mic_segments: List[TranscriptSegment],
+    loopback_segments: List[TranscriptSegment],
+    participants: Optional[List[str]] = None,
 ) -> str:
+    """Mescla mic (Fabio) e loopback (o resto) por timestamp. `participants`
+    são os nomes reais capturados via UI Automation
+    (SPEC-identificacao-participantes.md):
+    - 0 nomes (falhou/app não suportado): "Outros" como sempre, sem
+      ambiguidade nenhuma — comportamento inalterado.
+    - 1 nome (call 1:1, o caso comum): sem outra voz pra confundir, troca
+      "Outros" pelo nome real em todas as linhas.
+    - 2+ nomes (grupo): não dá pra saber quem falou cada linha sem
+      diarização (fora de escopo, ver módulo participants.py), então o
+      corpo continua "Outros" e só um cabeçalho lista quem estava lá —
+      o Mecanismo B (best-effort, botão "Identificar participantes" na UI)
+      pode relabelar linhas individuais depois, por cima do .txt já salvo."""
+    participants = participants or []
+    other_label = participants[0] if len(participants) == 1 else "Outros"
+
     tagged: List[Tuple[float, str, str]] = [
         (s.start_seconds, "Fabio", s.text) for s in mic_segments
     ]
-    tagged += [(s.start_seconds, "Outros", s.text) for s in loopback_segments]
+    tagged += [(s.start_seconds, other_label, s.text) for s in loopback_segments]
     tagged.sort(key=lambda item: item[0])
-    return "\n".join(
+    body = "\n".join(
         f"[{_format_timestamp(start)}] {speaker}: {text}" for start, speaker, text in tagged
     )
+
+    if len(participants) >= 2:
+        return f"Participantes: {', '.join(participants)}\n\n{body}"
+    return body
 
 
 def _render_content_transcript(segments: List[TranscriptSegment]) -> str:
@@ -65,6 +86,7 @@ def transcribe_recording(recording_id: int, api_key: str) -> None:
         loopback_paths = [Path(p) for p in json.loads(row["loopback_path"])]
 
         if row["mode"] == "call":
+            participants = json.loads(row["participants"]) if row["participants"] else []
             mic_segments = transcribe_track(
                 Path(row["mic_path"]), api_key, with_timestamps=True
             )
@@ -73,7 +95,7 @@ def transcribe_recording(recording_id: int, api_key: str) -> None:
                 loopback_segments.extend(
                     transcribe_track(path, api_key, with_timestamps=True)
                 )
-            transcript_text = _merge_call_segments(mic_segments, loopback_segments)
+            transcript_text = _merge_call_segments(mic_segments, loopback_segments, participants)
             reference_path = Path(row["mic_path"])
             transcript_path = reference_path.with_name(
                 reference_path.name.replace("_mic.wav", ".txt")
@@ -123,6 +145,7 @@ def transcribe_preview(recording_id: int, api_key: str) -> None:
             return clip_path
 
         if row["mode"] == "call":
+            participants = json.loads(row["participants"]) if row["participants"] else []
             mic_segments = transcribe_track(
                 _clip(Path(row["mic_path"])), api_key, with_timestamps=True
             )
@@ -131,7 +154,7 @@ def transcribe_preview(recording_id: int, api_key: str) -> None:
                 loopback_segments.extend(
                     transcribe_track(_clip(path), api_key, with_timestamps=True)
                 )
-            preview_text = _merge_call_segments(mic_segments, loopback_segments)
+            preview_text = _merge_call_segments(mic_segments, loopback_segments, participants)
         else:
             loopback_segments = []
             for path in loopback_paths:

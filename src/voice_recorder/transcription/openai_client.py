@@ -17,6 +17,7 @@ timestamps dos pedaços são realinhados pro tempo da gravação original.
 """
 
 import logging
+import re
 import shutil
 import tempfile
 import time
@@ -242,3 +243,63 @@ def transcribe_track(
     finally:
         if tmp_dir is not None:
             shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+# Modelo de texto puro pra atribuição heurística (Mecanismo B) — já
+# liberado na conta da OpenAI, ao contrário de gpt-4o-transcribe-diarize
+# (bloqueado, ver SPEC-identificacao-participantes.md). Não precisa do
+# mesmo tratamento de configurável dos modelos de transcrição: essa
+# chamada é texto->texto simples, sem restrição de formato de áudio.
+_PARTICIPANT_ASSIGNMENT_MODEL = "gpt-4o-mini"
+
+# O cabeçalho "Participantes: ..." que _merge_call_segments antepõe pra
+# call em grupo (worker.py) — separado do corpo ANTES de mandar pro LLM
+# e recolocado depois, em vez de confiar que o modelo preserva ele
+# verbatim: testado na prática, o gpt-4o-mini removeu o cabeçalho mesmo
+# com instrução explícita pra não adicionar/remover linhas.
+_PARTICIPANTS_HEADER_RE = re.compile(r"\AParticipantes: .*?\n\n", re.DOTALL)
+
+
+def identify_participants_in_transcript(
+    transcript_text: str, participants: List[str], api_key: str
+) -> str:
+    """Mecanismo B (best-effort, só entra em jogo pra call em grupo — ver
+    SPEC-identificacao-participantes.md): tenta relabelar linhas "Outros:"
+    com o nome mais provável usando só o contexto textual (ex: alguém
+    chamado pelo nome logo antes de falar). Continua "Outros:" quando o
+    contexto não deixa claro — o resultado é um palpite, não diarização
+    de verdade, por isso toda linha reatribuída é marcada com
+    "(provável)" explicitamente no texto."""
+    header_match = _PARTICIPANTS_HEADER_RE.match(transcript_text)
+    header = header_match.group(0) if header_match else ""
+    body = transcript_text[len(header):]
+
+    client = _client(api_key)
+    prompt = (
+        "Você recebe a transcrição de uma reunião com várias pessoas além do "
+        "Fabio, todas agrupadas sob o rótulo \"Outros\" porque a gravação "
+        "não distingue vozes, só \"microfone do Fabio\" vs \"resto\". Os "
+        "participantes reais desta reunião, além do Fabio, são: "
+        f"{', '.join(participants)}.\n\n"
+        "Reescreva a transcrição abaixo linha por linha. Troque \"Outros\" "
+        "pelo nome mais provável SÓ quando o contexto deixar claro quem "
+        "está falando (ex: alguém é chamado pelo nome logo antes ou se "
+        "apresenta). Nesses casos, marque a linha assim: "
+        "\"[MM:SS] Nome (provável): texto\". Quando não der pra saber com "
+        "confiança, mantenha \"Outros:\" exatamente como está. Não mude "
+        "nada nas linhas \"Fabio:\", não mude timestamps, não mude o "
+        "texto de nenhuma fala, não adicione nem remova linhas nem "
+        "comentários. Devolva só a transcrição reescrita.\n\n"
+        f"{body}"
+    )
+    response = client.chat.completions.create(
+        model=_PARTICIPANT_ASSIGNMENT_MODEL,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0,
+    )
+    text = response.choices[0].message.content
+    rewritten_body = text.strip() if text else body
+    # O modelo às vezes devolve espaços soltos no fim de cada linha
+    # (estilo quebra de linha do markdown) — cosmético, mas polui o .txt.
+    rewritten_body = "\n".join(line.rstrip() for line in rewritten_body.splitlines())
+    return header + rewritten_body

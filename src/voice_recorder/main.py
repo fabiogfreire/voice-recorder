@@ -17,7 +17,6 @@ import uvicorn
 
 from .db import create_recording, init_db, mark_stale_recordings_as_error, update_recording
 from .filenames import sanitize_for_filename
-from .notifications import register_app_identity
 from .notifications.call_notifier import notify_recording_started
 from .notifications.playback_notifier import notify_playback_detected
 from .paths import get_app_data_dir, get_recordings_dir
@@ -316,7 +315,6 @@ def start_web_server() -> None:
 
 
 def main() -> None:
-    register_app_identity()
     init_db()
     mark_stale_recordings_as_error()
 

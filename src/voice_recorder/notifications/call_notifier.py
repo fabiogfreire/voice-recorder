@@ -9,17 +9,14 @@ from typing import Callable
 
 from windows_toasts import InteractableWindowsToaster, Toast, ToastActivatedEventArgs, ToastButton
 
-from . import APP_USER_MODEL_ID
 
 logger = logging.getLogger("voice_recorder")
 
 APP_NAME = "Voice Recorder"
 _DISCARD_ARGUMENT = "discard"
 
-# notifierAUMID explícito — ver notifications/__init__.py sobre por que
-# não usar o padrão (identidade genérica do cmd.exe, compartilhada com
-# qualquer outro processo no sistema).
-_toaster = InteractableWindowsToaster(APP_NAME, notifierAUMID=APP_USER_MODEL_ID)
+# Sem notifierAUMID de propósito — ver notifications/__init__.py.
+_toaster = InteractableWindowsToaster(APP_NAME)
 
 
 def notify_recording_started(source_name: str, on_discard: Callable[[], None]) -> None:

@@ -1,46 +1,18 @@
-"""Identidade compartilhada das notificações do app.
+"""Notificações interativas do Windows (toasts).
 
-`InteractableWindowsToaster` sem um `notifierAUMID` explícito usa por
-padrão o AUMID do **cmd.exe** (`{1AC14E77-...}\\cmd.exe` — ver
-`windows_toasts/toasters.py`, `InteractableWindowsToaster.__init__`).
-Isso é uma identidade genérica compartilhada por qualquer processo no
-sistema que use essa mesma conveniência da biblioteca pra mostrar toasts
-interativos sem registrar um app de verdade — inclusive processos
-`cmd.exe` avulsos, de qualquer script, rodando ao mesmo tempo.
+Os dois notifiers usam o AUMID padrão da `windows_toasts` (o do
+**cmd.exe**), de propósito: não passar `notifierAUMID` ao
+`InteractableWindowsToaster`.
 
-Suspeita levantada por um caso real: gravações de call descartadas
-sozinhas, sem o Fabio ter clicado em "Não gravar" (main.py:on_discard_current
-disparado poucos milissegundos depois da call começar, em 3 ocasiões
-diferentes, com apps diferentes). O Windows Shell roteia o clique num
-botão de notificação pelo AUMID, não necessariamente pelo processo exato
-que criou aquela notificação — com uma identidade genérica e compartilhada,
-não dá pra descartar cruzamento com outro processo usando o mesmo AUMID
-por coincidência. Não foi possível reproduzir sob demanda pra confirmar
-100%, mas registrar uma identidade PRÓPRIA pro Voice Recorder elimina essa
-categoria inteira de interferência, é a prática correta de qualquer
-forma, e é barato o suficiente pra valer a pena mesmo sem certeza
-absoluta da causa raiz."""
+Entre 25/09 e 25/11/2026 o app usou um AUMID próprio, adotado pra
+investigar descartes fantasma de gravação. Nesse período os pop-ups
+deixaram de aparecer sem erro nenhum: `show_toast` retorna normal e o log
+do Windows marca a notificação como entregue, mas nada salta na tela. Em
+teste ao vivo, nem registrar o AUMID em `HKCU\\Software\\Classes\\
+AppUserModelId` resolveu (com o identificador antigo e com um novo),
+enquanto o mesmo toast com o AUMID padrão apareceu e entregou o clique.
 
-import ctypes
-import logging
-
-logger = logging.getLogger("voice_recorder")
-
-APP_USER_MODEL_ID = "FabioGomesFreire.VoiceRecorder"
-
-_shell32 = ctypes.windll.shell32
-_shell32.SetCurrentProcessExplicitAppUserModelID.argtypes = [ctypes.c_wchar_p]
-
-
-def register_app_identity() -> None:
-    """Registra o AUMID próprio pro processo atual — precisa rodar bem no
-    início, antes de qualquer toast ser criado. Chamado 1x em main.py.
-    Falha (silenciosa, só loga) não deve impedir o app de subir: pior
-    caso, as notificações voltam a usar a identidade genérica do
-    cmd.exe, igual hoje."""
-    try:
-        hr = _shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
-        if hr != 0:
-            logger.warning("SetCurrentProcessExplicitAppUserModelID falhou (hr=%s).", hr)
-    except OSError:
-        logger.exception("Falha ao registrar AUMID do app.")
+A identidade do cmd.exe é compartilhada com outros processos. A proteção
+contra um clique indevido fica no callback de cada toast, que só age sobre
+a gravação daquele pop-up e loga o argumento recebido. Antes de voltar a um
+AUMID próprio, confirmar na tela que o pop-up aparece."""

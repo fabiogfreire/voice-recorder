@@ -12,11 +12,14 @@ qualquer ferramenta de call sem precisar de uma lista configurada.
 """
 
 import ctypes
+import logging
 import threading
 import winreg
 from ctypes import wintypes
 from dataclasses import dataclass
 from typing import Callable, Iterator, List, Optional, Tuple
+
+logger = logging.getLogger("voice_recorder")
 
 CONSENT_STORE_PATH = (
     r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager"
@@ -142,14 +145,27 @@ class MicWatcher:
             self._thread.join(timeout=2)
 
     def _run(self) -> None:
+        # Qualquer excecao aqui antes matava a thread em silencio (o stderr do
+        # .exe nao vai pro arquivo de log) e o app deixava de detectar calls ate
+        # ser reiniciado. Agora o erro e logado e o loop continua.
+        last_logged_apps: List[str] = []
         while not self._stop_event.is_set():
-            active_apps = get_active_mic_apps()
-            is_active = len(active_apps) > 0
+            try:
+                active_apps = get_active_mic_apps()
+                is_active = len(active_apps) > 0
 
-            if is_active and not self._was_active:
-                self.on_call_start(active_apps)
-            elif not is_active and self._was_active:
-                self.on_call_end()
+                if sorted(active_apps) != sorted(last_logged_apps):
+                    logger.info("Microfone em uso por: %s", active_apps or "nenhum app")
+                    last_logged_apps = list(active_apps)
 
-            self._was_active = is_active
+                if is_active and not self._was_active:
+                    self._was_active = is_active
+                    self.on_call_start(active_apps)
+                elif not is_active and self._was_active:
+                    self._was_active = is_active
+                    self.on_call_end()
+                else:
+                    self._was_active = is_active
+            except Exception:
+                logger.exception("Erro no watcher de microfone; seguindo em frente.")
             self._stop_event.wait(self.config.poll_interval_seconds)

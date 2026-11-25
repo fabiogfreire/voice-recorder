@@ -157,7 +157,11 @@ def on_call_start(active_apps: List[str]) -> None:
         if _current_recording is not None:
             return
 
-        _audio_muter.mute_other_apps(active_apps)
+        # Falha ao mutar outros apps nunca pode impedir a gravacao da call.
+        try:
+            _audio_muter.mute_other_apps(active_apps)
+        except Exception:
+            logger.exception("Falha ao mutar outros apps; gravando a call mesmo assim.")
 
         source_name = _derive_source_name(active_apps)
         started_at = datetime.now()

@@ -15,19 +15,23 @@ import ctypes
 import logging
 import os
 import threading
+import time
 from ctypes import wintypes
 from dataclasses import dataclass
 from typing import Callable, List, Optional
 
 import psutil
 
-from .audio_sessions import CAPTURE, init_com, iter_sessions
+from .audio_sessions import CAPTURE, RENDER, init_com, iter_sessions
 
 import comtypes
+from pycaw.api.endpointvolume import IAudioMeterInformation
 
 logger = logging.getLogger("voice_recorder")
 
 _SESSION_ACTIVE = 1  # AudioSessionStateActive
+# Mesmo limiar de silêncio do PlaybackWatcher.
+_PEAK_THRESHOLD = 30.0 / 32767
 _WEBVIEW_PROCESS = "msedgewebview2.exe"
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
@@ -88,10 +92,40 @@ def _app_label(process: psutil.Process) -> str:
     return f"NonPackaged\\{path.replace(chr(92), '#')}"
 
 
+def is_ignored_app(label: str) -> bool:
+    """Apps que nunca contam como call nem como áudio a gravar. Claude: o
+    Fabio dita pra ele pelo microfone, e cada ditado abria um pop-up."""
+    name = label.lower()
+    return name.startswith("claude_") or name.split("#")[-1] == "claude.exe"
+
+
+def only_ignored_apps_playing(samples: int = 6, interval_seconds: float = 0.25) -> bool:
+    """True se há som saindo e ele vem só de apps ignorados. Amostra por
+    ~1,5s, porque o medidor é instantâneo. Qualquer falha vira False: o pior
+    caso é um pop-up a mais."""
+    init_com()
+    playing = set()
+    try:
+        for attempt in range(samples):
+            if attempt:
+                time.sleep(interval_seconds)
+            for pid, control in iter_sessions(RENDER):
+                try:
+                    peak = control.QueryInterface(IAudioMeterInformation).GetPeakValue()
+                    if peak >= _PEAK_THRESHOLD:
+                        playing.add(_app_label(_app_process(pid)))
+                except (comtypes.COMError, psutil.Error):
+                    continue
+    except Exception:
+        logger.exception("Falha ao verificar quem está tocando áudio.")
+        return False
+    return bool(playing) and all(is_ignored_app(label) for label in playing)
+
+
 def get_active_mic_apps() -> List[str]:
     """Retorna os rótulos dos apps com o microfone em uso agora, excluindo
-    o próprio processo do Voice Recorder — senão o app nunca veria "call
-    encerrada" enquanto está gravando."""
+    os ignorados e o próprio processo do Voice Recorder — senão o app nunca
+    veria "call encerrada" enquanto está gravando."""
     init_com()
     own_pid = os.getpid()
     own_label = _app_label(psutil.Process(own_pid)).lower()
@@ -104,7 +138,7 @@ def get_active_mic_apps() -> List[str]:
             label = _app_label(_app_process(pid))
         except (comtypes.COMError, psutil.Error):
             continue  # sessão ou processo sumiu no meio da varredura
-        if label.lower() != own_label and label not in labels:
+        if label.lower() != own_label and not is_ignored_app(label) and label not in labels:
             labels.append(label)
     return labels
 

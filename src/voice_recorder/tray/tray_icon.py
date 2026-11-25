@@ -17,8 +17,8 @@ UI_URL = "http://localhost:8000"
 # partir de fora (main.py). O próprio pystray já atualiza o menu sozinho
 # quando a ação é disparada por um clique NO menu (`_handler` em
 # pystray/_win32.py chama update_menu() depois de cada callback de item)
-# — mas o toggle do Modo 2 também é disparado pelo botão "Gravar" da
-# notificação toast (playback_notifier.py), fora do menu, e nesse caminho
+# — mas a gravação do Modo 2 também começa pelo botão "Sim" do pop-up de
+# áudio (playback_notifier.py), fora do menu, e nesse caminho
 # o rótulo dinâmico ("Gravar isso" -> "Parar gravação de conteúdo") nunca
 # era reavaliado: testado na prática, o menu ficava travado no texto
 # antigo mesmo com a gravação ativa (clicar nele funcionava — só o texto
